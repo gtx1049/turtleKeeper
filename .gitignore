@@ -1,23 +1,21 @@
-# Binaries
+
+backend/data_test/
 backend/turtlekeeper
 backend/turtlekeeper.exe
-*.exe
-*.test
-*.out
-
-# DB
+# Binaries
 *.db
+# DB
+.DS_Store
+# Editor
+*.exe
+.idea/
+*.log
+# Logs
+# OS
+*.out
 *.sqlite
 *.sqlite3
-
-# Logs
-*.log
-
-# OS
-.DS_Store
-Thumbs.db
-
-# Editor
-.vscode/
-.idea/
 *.swp
+*.test
+Thumbs.db
+.vscode/

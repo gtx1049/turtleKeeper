@@ -207,6 +207,16 @@ func initDB(dataDir string) error {
 		species_id TEXT,
 		PRIMARY KEY (player_id, species_id)
 	);
+
+	CREATE TABLE IF NOT EXISTS water_history (
+		tank_id TEXT,
+		day INTEGER,
+		ammonia REAL,
+		nitrite REAL,
+		clarity INTEGER,
+		PRIMARY KEY (tank_id, day)
+	);
+	CREATE INDEX IF NOT EXISTS idx_water_history_tank ON water_history(tank_id, day);
 	`
 
 	_, err = db.Exec(schema)
@@ -963,8 +973,40 @@ func advancePlayerTanks(playerID string) error {
 		if _, err := db.Exec("UPDATE tanks SET ammonia = ?, nitrite = ?, clarity = ? WHERE id = ?", ammonia, nitrite, clarity, tank.ID); err != nil {
 			return err
 		}
+		// 记录水质历史，前端 sparkline 用；只保留最近 14 天
+		var curDay int
+		if err := db.QueryRow("SELECT day FROM players WHERE id = ?", playerID).Scan(&curDay); err == nil {
+			db.Exec(`INSERT OR REPLACE INTO water_history (tank_id, day, ammonia, nitrite, clarity) VALUES (?, ?, ?, ?, ?)`,
+				tank.ID, curDay, ammonia, nitrite, clarity)
+			db.Exec(`DELETE FROM water_history WHERE tank_id = ? AND day < ?`, tank.ID, curDay-14)
+		}
 	}
 	return nil
+}
+
+// loadWaterHistory 读取该龟缸最近 N 天水质历史
+func loadWaterHistory(tankID string, lastN int) []map[string]interface{} {
+	rows, err := db.Query(`SELECT day, ammonia, nitrite, clarity FROM water_history WHERE tank_id = ? ORDER BY day DESC LIMIT ?`, tankID, lastN)
+	if err != nil {
+		return nil
+	}
+	defer rows.Close()
+	var list []map[string]interface{}
+	for rows.Next() {
+		var day, clarity int
+		var ammonia, nitrite float64
+		if err := rows.Scan(&day, &ammonia, &nitrite, &clarity); err != nil {
+			continue
+		}
+		list = append(list, map[string]interface{}{
+			"day": day, "ammonia": ammonia, "nitrite": nitrite, "clarity": clarity,
+		})
+	}
+	// 反转成时间升序，前端方便画
+	for i, j := 0, len(list)-1; i < j; i, j = i+1, j-1 {
+		list[i], list[j] = list[j], list[i]
+	}
+	return list
 }
 
 func advancePlayerTurtles(playerID string) error {
@@ -1358,4 +1400,128 @@ func findOrCreateTankForSpecies(playerID string, sp SpeciesInfo) (string, error)
 		return "", err
 	}
 	return tankID, nil
+}
+
+// handleTurtleDetail GET /api/turtle?id=xxx&player_id=default
+// 返回某只龟的详细信息：基础属性 + 健康四维 + 龟种习性 + 当前缸水质 + 14日水质历史 + 智能建议。
+func handleTurtleDetail(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	id := r.URL.Query().Get("id")
+	if id == "" {
+		http.Error(w, "missing id", http.StatusBadRequest)
+		return
+	}
+	playerID := r.URL.Query().Get("player_id")
+	if playerID == "" {
+		playerID = "default"
+	}
+
+	var t Turtle
+	err := db.QueryRow(`SELECT id, species, name, gender, birth_day, weight, personality,
+		vitality, appetite, skin, shell, intimacy, melanism,
+		COALESCE(tank_id, ''), hunger, cleanliness, mood
+		FROM turtles WHERE id = ? AND player_id = ?`, id, playerID).Scan(
+		&t.ID, &t.Species, &t.Name, &t.Gender, &t.BirthDay, &t.Weight, &t.Personality,
+		&t.Health.Vitality, &t.Health.Appetite, &t.Health.Skin, &t.Health.Shell,
+		&t.Intimacy, &t.Melanism, &t.TankID, &t.Hunger, &t.Cleanliness, &t.Mood,
+	)
+	if err != nil {
+		http.Error(w, "turtle not found", http.StatusNotFound)
+		return
+	}
+
+	var curDay int
+	db.QueryRow("SELECT day FROM players WHERE id = ?", playerID).Scan(&curDay)
+	ageDays := curDay - t.BirthDay
+	if ageDays < 0 {
+		ageDays = 0
+	}
+
+	species, _ := findSpecies(t.Species)
+
+	// 当前缸 + 历史
+	var tank map[string]interface{}
+	var waterHistory []map[string]interface{}
+	if t.TankID != "" {
+		var tk Tank
+		var hasFilterI, hasUVBI int
+		err := db.QueryRow(`SELECT id, name, water_level, has_filter, has_uvb,
+			ph, ammonia, nitrite, clarity, temp_day, temp_night
+			FROM tanks WHERE id = ?`, t.TankID).Scan(
+			&tk.ID, &tk.Name, &tk.WaterLevel, &hasFilterI, &hasUVBI,
+			&tk.WaterQual.PH, &tk.WaterQual.Ammonia, &tk.WaterQual.Nitrite, &tk.WaterQual.Clarity,
+			&tk.TempDay, &tk.TempNight,
+		)
+		if err == nil {
+			tk.HasFilter = hasFilterI == 1
+			tk.HasUVB = hasUVBI == 1
+			tank = map[string]interface{}{
+				"id":           tk.ID,
+				"name":         tk.Name,
+				"water_level":  tk.WaterLevel,
+				"water_name":   waterLevelName(tk.WaterLevel),
+				"has_filter":   tk.HasFilter,
+				"has_uvb":      tk.HasUVB,
+				"ph":           tk.WaterQual.PH,
+				"ammonia":      tk.WaterQual.Ammonia,
+				"nitrite":      tk.WaterQual.Nitrite,
+				"clarity":      tk.WaterQual.Clarity,
+				"temp_day":     tk.TempDay,
+				"temp_night":   tk.TempNight,
+			}
+			waterHistory = loadWaterHistory(t.TankID, 14)
+		}
+	}
+
+	// 智能建议（toast/UI 高亮的依据）
+	suggestions := buildTurtleSuggestions(t, species, tank)
+
+	resp := map[string]interface{}{
+		"turtle":         t,
+		"age_days":       ageDays,
+		"species_info":   species,
+		"tank":           tank,
+		"water_history":  waterHistory,
+		"suggestions":    suggestions,
+	}
+	json.NewEncoder(w).Encode(resp)
+}
+
+// buildTurtleSuggestions 根据当前龟+缸状态生成 0~N 条操作建议。
+// 用于详情面板顶部彩色提示 + 后续主界面按钮智能高亮。
+func buildTurtleSuggestions(t Turtle, sp SpeciesInfo, tank map[string]interface{}) []map[string]interface{} {
+	var out []map[string]interface{}
+	if t.Hunger <= 30 {
+		out = append(out, map[string]interface{}{"level": "warn", "icon": "🍖", "text": fmt.Sprintf("%s 已经很饿了（饥饿度 %d），建议立刻喂食", t.Name, t.Hunger)})
+	} else if t.Hunger <= 55 {
+		out = append(out, map[string]interface{}{"level": "info", "icon": "🥗", "text": fmt.Sprintf("%s 有些饿了，可以补一顿", t.Name)})
+	}
+	if t.Cleanliness <= 40 {
+		out = append(out, map[string]interface{}{"level": "warn", "icon": "🛁", "text": "身上脏了，建议清洁或换水"})
+	}
+	if t.Mood <= 40 {
+		out = append(out, map[string]interface{}{"level": "info", "icon": "👋", "text": "心情低落，多互动可提升亲密度"})
+	}
+	if t.Health.Vitality <= 50 || t.Health.Appetite <= 50 {
+		out = append(out, map[string]interface{}{"level": "warn", "icon": "🩺", "text": "活力/食欲偏低，注意水质和环境温度"})
+	}
+	if tank != nil {
+		if a, ok := tank["ammonia"].(float64); ok && a >= 1.0 {
+			out = append(out, map[string]interface{}{"level": "danger", "icon": "☠️", "text": fmt.Sprintf("NH₃ 已达 %.2f mg/L，强烈建议换水", a)})
+		}
+		if c, ok := tank["clarity"].(int); ok && c < 50 {
+			out = append(out, map[string]interface{}{"level": "warn", "icon": "💧", "text": "水体浑浊，建议深度清洁或开过滤"})
+		}
+		if hf, ok := tank["has_filter"].(bool); ok && !hf {
+			out = append(out, map[string]interface{}{"level": "info", "icon": "⚙️", "text": "当前缸未安装过滤器，可在维护菜单中安装"})
+		}
+		// 龟种 vs 缸水位匹配性
+		if wl, ok := tank["water_level"].(string); ok && sp.ID != "" && wl != sp.HabitatType && sp.HabitatType != "" {
+			out = append(out, map[string]interface{}{"level": "warn", "icon": "🏠", "text": fmt.Sprintf("%s 偏好「%s」缸，当前为「%s」，可考虑搬家", sp.Name, waterLevelName(sp.HabitatType), waterLevelName(wl))})
+		}
+	}
+	if len(out) == 0 {
+		out = append(out, map[string]interface{}{"level": "ok", "icon": "✅", "text": "一切安好，享受佛系养龟时光吧"})
+	}
+	return out
 }

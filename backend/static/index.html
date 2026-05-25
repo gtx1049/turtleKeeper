@@ -122,9 +122,15 @@
 
         <!-- 乌龟详情弹窗 -->
         <div id="turtle-detail-modal" class="modal hidden">
-            <div class="modal-content">
+            <div class="modal-content wide">
                 <h3 id="detail-name">乌龟详情</h3>
+                <div id="detail-suggestions"></div>
                 <div id="detail-stats"></div>
+                <div id="detail-water">
+                    <h4 class="section-title">💧 当前缸 14 日水质趋势</h4>
+                    <canvas id="water-sparkline" width="360" height="100"></canvas>
+                    <div id="water-legend" class="sparkline-legend"></div>
+                </div>
                 <button class="close-btn">关闭</button>
             </div>
         </div>

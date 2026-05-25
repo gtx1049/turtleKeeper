@@ -42,6 +42,7 @@ func main() {
 	http.HandleFunc("/api/buy-species", ensurePlayerMiddleware(handleBuySpecies))
 	http.HandleFunc("/api/create-tank", ensurePlayerMiddleware(handleCreateTank))
 	http.HandleFunc("/api/move-turtle", ensurePlayerMiddleware(handleMoveTurtle))
+	http.HandleFunc("/api/turtle", handleTurtleDetail)
 
 	// 获取端口
 	port := os.Getenv("PORT")

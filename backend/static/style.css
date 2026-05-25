@@ -887,3 +887,53 @@ body {
     width: 46px;
     height: 36px;
 }
+
+/* ===== 操作按钮智能高亮 ===== */
+.action-btn.nudge {
+    box-shadow: 0 0 0 2px #f7c84a inset;
+    animation: nudge-pulse 1.8s ease-in-out infinite;
+}
+.action-btn.urgent {
+    box-shadow: 0 0 0 2px #ff5252 inset;
+    animation: nudge-pulse 1s ease-in-out infinite;
+}
+@keyframes nudge-pulse {
+    0%, 100% { filter: brightness(1); }
+    50% { filter: brightness(1.25); }
+}
+
+/* ===== 龟龟详情 modal ===== */
+.modal-content.wide #detail-suggestions { margin: 6px 0 10px; display: flex; flex-direction: column; gap: 4px; }
+.suggestion {
+    padding: 6px 10px; border-radius: 8px; font-size: 13px;
+    background: #1a2a30; color: #e5e7d0;
+    border-left: 3px solid #4a5;
+}
+.suggestion .s-icon { margin-right: 6px; }
+.suggestion.info   { border-left-color: #4ab8e6; }
+.suggestion.warn   { border-left-color: #f7c84a; background: #2a2418; }
+.suggestion.danger { border-left-color: #ff5252; background: #2c1818; }
+.suggestion.ok     { border-left-color: #5fd17a; }
+
+.detail-meta {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 4px 12px;
+    font-size: 13px; color: #cde; margin-bottom: 10px;
+    background: #131e22; padding: 8px 10px; border-radius: 8px;
+}
+.detail-meta b { color: #f0e6a8; margin-right: 4px; }
+
+.detail-bars { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+.stat-row {
+    display: grid; grid-template-columns: 60px 1fr 40px; align-items: center; gap: 6px;
+    font-size: 12px; color: #cfd;
+}
+.stat-bar { height: 8px; background: #15252b; border-radius: 4px; overflow: hidden; }
+.stat-fill { height: 100%; background: linear-gradient(90deg, #5fd17a, #4ab8e6); }
+.stat-num { text-align: right; color: #9bb; }
+
+.species-desc { color: #99b; font-size: 12px; margin: 8px 0 4px; }
+.section-title { margin: 12px 0 6px; color: #f0e6a8; font-size: 13px; }
+#water-sparkline { display: block; width: 100%; max-width: 360px; border-radius: 8px; }
+.sparkline-legend { display: flex; gap: 10px; font-size: 12px; color: #9bb; margin-top: 4px; }
+.sparkline-legend .lg { display: inline-flex; align-items: center; gap: 4px; }
+.sparkline-legend i { display: inline-block; width: 10px; height: 4px; border-radius: 2px; }

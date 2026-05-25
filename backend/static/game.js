@@ -73,6 +73,32 @@ function updateUI() {
         const tank = getCurrentTank() || gameState.tanks[0];
         decor = tank.decor || [];
     }
+    refreshActionHighlights();
+}
+
+// 根据当前选中龟的状态给底部按钮加 .urgent / .nudge 高亮
+function refreshActionHighlights() {
+    const t = getCurrentTurtle();
+    const tank = getCurrentTank();
+    const map = { feed: false, clean: false, decor: false, interact: false };
+    const urgent = { feed: false, clean: false };
+    if (t) {
+        if (t.hunger <= 30) urgent.feed = true; else if (t.hunger <= 55) map.feed = true;
+        if (t.cleanliness <= 40) urgent.clean = true; else if (t.cleanliness <= 65) map.clean = true;
+        if (t.mood <= 40) map.interact = true;
+    }
+    if (tank) {
+        const wq = tank.water_quality || {};
+        if ((wq.ammonia||0) >= 1.0 || (wq.clarity||100) < 50) urgent.clean = true;
+        const decorCount = (tank.decor||[]).length;
+        if (decorCount === 0) map.decor = true;
+    }
+    document.querySelectorAll('.action-btn').forEach(btn => {
+        const k = btn.dataset.action;
+        btn.classList.remove('nudge', 'urgent');
+        if (urgent[k]) btn.classList.add('urgent');
+        else if (map[k]) btn.classList.add('nudge');
+    });
 }
 
 function getCurrentTank() {
@@ -232,6 +258,7 @@ function getTurtleAvatarMarkup(species) {
 }
 
 function selectTurtle(id) {
+    const sameTurtle = currentTurtleId === id;
     currentTurtleId = id;
     const turtle = getCurrentTurtle();
     if (turtle && turtle.tank_id) {
@@ -246,6 +273,11 @@ function selectTurtle(id) {
     const card = document.querySelector(`[data-turtle-id="${id}"]`);
     if (card) card.classList.add('active');
     initTurtleRenderers();
+    refreshActionHighlights();
+    // 重复点击同一只龟 → 开详情（移动端不用双击）
+    if (sameTurtle) {
+        showTurtleDetail(id);
+    }
 }
 
 // ============ 渲染系统 ============
@@ -1138,3 +1170,134 @@ function showToast(msg) {
     toast.classList.add('show');
     setTimeout(() => toast.classList.remove('show'), 2000);
 }
+
+// ============ 龟龟详情面板 + 水质 sparkline ============
+async function showTurtleDetail(turtleId) {
+    try {
+        const res = await fetch(`/api/turtle?id=${encodeURIComponent(turtleId)}&player_id=${PLAYER_ID || 'default'}`);
+        if (!res.ok) { showToast('加载详情失败'); return; }
+        const data = await res.json();
+        renderTurtleDetail(data);
+        document.getElementById('turtle-detail-modal').classList.remove('hidden');
+    } catch (e) {
+        showToast('详情请求失败');
+    }
+}
+
+function renderTurtleDetail(data) {
+    const t = data.turtle || {};
+    const sp = data.species_info || {};
+    const tank = data.tank || null;
+    const sugg = data.suggestions || [];
+    const age = data.age_days || 0;
+
+    document.getElementById('detail-name').textContent = `${t.name} · ${sp.name || t.species}`;
+
+    // 建议
+    const sBox = document.getElementById('detail-suggestions');
+    sBox.innerHTML = sugg.map(s => `<div class="suggestion ${s.level}"><span class="s-icon">${s.icon}</span>${escapeHtml(s.text)}</div>`).join('');
+
+    // 状态条
+    const statsBox = document.getElementById('detail-stats');
+    const bar = (label, val, max = 100, cls = '') => `
+        <div class="stat-row ${cls}">
+            <span class="stat-label">${label}</span>
+            <div class="stat-bar"><div class="stat-fill" style="width:${Math.max(0, Math.min(100, val * 100 / max))}%"></div></div>
+            <span class="stat-num">${val}</span>
+        </div>`;
+    const h = t.health || {};
+    statsBox.innerHTML = `
+        <div class="detail-meta">
+            <div><b>性别</b> ${t.gender || '?'}</div>
+            <div><b>性格</b> ${t.personality || '未知'}</div>
+            <div><b>体重</b> ${(t.weight || 0).toFixed(1)} g</div>
+            <div><b>年龄</b> ${age} 天</div>
+            <div><b>所在</b> ${tank ? tank.name + ' / ' + tank.water_name : '待分缸'}</div>
+            <div><b>偏好</b> ${sp.habitat_type ? habitatName(sp.habitat_type) : '-'}</div>
+        </div>
+        <div class="detail-bars">
+            ${bar('饥饿度', t.hunger)}
+            ${bar('清洁度', t.cleanliness)}
+            ${bar('心情',   t.mood)}
+            ${bar('活力',   h.vitality)}
+            ${bar('食欲',   h.appetite)}
+            ${bar('皮肤',   h.skin)}
+            ${bar('壳',     h.shell)}
+            ${bar('亲密度', t.intimacy)}
+        </div>
+        <p class="species-desc">${sp.description || ''}</p>
+    `;
+
+    drawWaterSparkline(data.water_history || []);
+}
+
+function drawWaterSparkline(history) {
+    const cvs = document.getElementById('water-sparkline');
+    const legend = document.getElementById('water-legend');
+    if (!cvs) return;
+    const ctx = cvs.getContext('2d');
+    const W = cvs.width, H = cvs.height;
+    ctx.clearRect(0, 0, W, H);
+    // 背景
+    ctx.fillStyle = '#101a20';
+    ctx.fillRect(0, 0, W, H);
+    if (!history.length) {
+        ctx.fillStyle = '#aaa';
+        ctx.font = '13px sans-serif';
+        ctx.fillText('暂无水质历史（推进几天后会出现）', 16, H / 2);
+        legend.innerHTML = '';
+        return;
+    }
+    const padL = 28, padR = 12, padT = 12, padB = 22;
+    const innerW = W - padL - padR;
+    const innerH = H - padT - padB;
+
+    // 轴线
+    ctx.strokeStyle = '#26424c';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(padL, padT); ctx.lineTo(padL, H - padB); ctx.lineTo(W - padR, H - padB); ctx.stroke();
+
+    const n = history.length;
+    const xAt = i => padL + (n === 1 ? innerW / 2 : (i * innerW) / (n - 1));
+
+    const drawLine = (vals, color, max) => {
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        vals.forEach((v, i) => {
+            const x = xAt(i);
+            const y = padT + innerH * (1 - Math.max(0, Math.min(1, v / max)));
+            if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        ctx.fillStyle = color;
+        vals.forEach((v, i) => {
+            const x = xAt(i);
+            const y = padT + innerH * (1 - Math.max(0, Math.min(1, v / max)));
+            ctx.beginPath(); ctx.arc(x, y, 2.5, 0, Math.PI * 2); ctx.fill();
+        });
+    };
+
+    drawLine(history.map(h => h.ammonia), '#ff7676', 2.0);   // NH3 上限参考 2.0
+    drawLine(history.map(h => h.nitrite), '#ffd166', 1.0);   // NO2 上限 1.0
+    drawLine(history.map(h => (h.clarity || 0) / 100), '#76e0ff', 1.0); // 清澈 0~1
+
+    // x 轴标签：起始/结束日
+    ctx.fillStyle = '#7aa';
+    ctx.font = '11px sans-serif';
+    ctx.fillText('D' + history[0].day, padL - 8, H - 6);
+    ctx.fillText('D' + history[history.length - 1].day, W - padR - 18, H - 6);
+
+    legend.innerHTML = `
+        <span class="lg"><i style="background:#ff7676"></i>NH₃</span>
+        <span class="lg"><i style="background:#ffd166"></i>NO₂</span>
+        <span class="lg"><i style="background:#76e0ff"></i>清澈%</span>
+    `;
+}
+
+function escapeHtml(s) {
+    return String(s||'').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+const PLAYER_ID = 'default';
