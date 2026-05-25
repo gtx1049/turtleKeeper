@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
+    <title>龟乐园 · TurtleKeeper</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div id="game-container">
+        <!-- 顶部状态栏 -->
+        <div id="top-bar">
+            <div class="stat-item">
+                <span class="icon">🪙</span>
+                <span id="coins">500</span>
+            </div>
+            <div class="stat-item">
+                <span class="icon">📅</span>
+                <span id="day-info">第 1 天 · 春季</span>
+            </div>
+            <div class="stat-item">
+                <span class="icon">⏰</span>
+                <button id="advance-day-btn">下一天</button>
+            </div>
+        </div>
+
+        <!-- 主游戏区域 -->
+        <div id="main-area">
+            <!-- 龟缸视图 -->
+            <div id="tank-view">
+                <canvas id="tank-canvas"></canvas>
+                <div id="tank-info">
+                    <span id="tank-name">麝香的家</span>
+                    <span id="tank-water">深水缸</span>
+                </div>
+                <div id="water-panel">
+                    <div class="water-panel-title">💧 水质监测</div>
+                    <div class="water-chip"><span>NH₃</span><b id="water-ammonia">0.00</b></div>
+                    <div class="water-chip"><span>NO₂</span><b id="water-nitrite">0.00</b></div>
+                    <div class="water-chip"><span>清澈</span><b id="water-clarity">100%</b></div>
+                    <div class="water-chip"><span>过滤</span><b id="water-filter">ON</b></div>
+                </div>
+            </div>
+
+            <!-- 龟缸切换 -->
+            <div id="tank-tabs"></div>
+            <button id="tank-manage-btn">🏠 龟缸管理 / 搬家</button>
+
+            <!-- 乌龟列表 -->
+            <div id="turtle-list">
+                <div class="turtle-card active" data-turtle-id="turtle_1">
+                    <div class="turtle-avatar">🐢</div>
+                    <div class="turtle-name">小麝香</div>
+                    <div class="turtle-hunger">
+                        <div class="bar"><div class="fill" style="width: 50%"></div></div>
+                    </div>
+                </div>
+                <div class="turtle-card" data-turtle-id="turtle_2">
+                    <div class="turtle-avatar">🐢</div>
+                    <div class="turtle-name">小草</div>
+                    <div class="turtle-hunger">
+                        <div class="bar"><div class="fill" style="width: 60%"></div></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 底部操作栏 -->
+        <div id="bottom-actions">
+            <button class="action-btn" data-action="feed">
+                <span class="btn-icon">🍖</span>
+                <span class="btn-text">喂食</span>
+            </button>
+            <button class="action-btn" data-action="clean">
+                <span class="btn-icon">🧹</span>
+                <span class="btn-text">清洁</span>
+            </button>
+            <button class="action-btn" data-action="decor">
+                <span class="btn-icon">🪵</span>
+                <span class="btn-text">布景</span>
+            </button>
+            <button class="action-btn" data-action="collection">
+                <span class="btn-icon">📖</span>
+                <span class="btn-text">图鉴</span>
+            </button>
+            <button class="action-btn" data-action="interact">
+                <span class="btn-icon">👋</span>
+                <span class="btn-text">互动</span>
+            </button>
+        </div>
+
+        <!-- 喂食弹窗 -->
+        <div id="feed-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3>选择食物</h3>
+                <div id="food-list"></div>
+                <button class="close-btn">关闭</button>
+            </div>
+        </div>
+
+        <!-- 水质维护弹窗 -->
+        <div id="maintenance-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3>🧹 水质维护</h3>
+                <p class="modal-tip">不同维护方式有不同成本：日常捞残饵免费，换水/深度清洁更有效，没过滤器的龟缸可以直接安装。</p>
+                <div id="maintenance-list"></div>
+                <button class="close-btn">关闭</button>
+            </div>
+        </div>
+
+        <!-- 龟缸管理弹窗 -->
+        <div id="tank-manage-modal" class="modal hidden">
+            <div class="modal-content wide">
+                <h3>🏠 龟缸管理</h3>
+                <p class="modal-tip">新建龟缸需要 120 龟币；搬家会校验龟种适合的水位，避免把深水龟搬进半水陆缸。</p>
+                <div id="create-tank-list"></div>
+                <h4 class="section-title">🐢 乌龟搬家</h4>
+                <div id="move-turtle-list"></div>
+                <button class="close-btn">关闭</button>
+            </div>
+        </div>
+
+        <!-- 乌龟详情弹窗 -->
+        <div id="turtle-detail-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3 id="detail-name">乌龟详情</h3>
+                <div id="detail-stats"></div>
+                <button class="close-btn">关闭</button>
+            </div>
+        </div>
+
+        <!-- 布景弹窗 -->
+        <div id="decor-modal" class="modal hidden">
+            <div class="modal-content">
+                <h3>🪵 布置龟缸</h3>
+                <p class="modal-tip">选择一个造景，会放到当前龟缸；放好后可直接在缸里拖动调整位置。</p>
+                <div id="decor-list"></div>
+                <button class="close-btn">关闭</button>
+            </div>
+        </div>
+
+        <!-- 图鉴弹窗 -->
+        <div id="collection-modal" class="modal hidden">
+            <div class="modal-content wide">
+                <h3>🐢 龟类图鉴</h3>
+                <div id="species-list"></div>
+                <button class="close-btn">关闭</button>
+            </div>
+        </div>
+
+        <!-- 消息提示 -->
+        <div id="toast"></div>
+    </div>
+
+    <script src="game.js"></script>
+</body>
+</html>

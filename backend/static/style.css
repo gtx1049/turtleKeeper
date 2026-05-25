@@ -1,0 +1,879 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: #1a1a2e;
+    color: #eee;
+    overflow: hidden;
+    height: 100vh;
+    width: 100vw;
+}
+
+#game-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    max-width: 480px;
+    margin: 0 auto;
+    background: linear-gradient(180deg, #16213e 0%, #0f3460 100%);
+    position: relative;
+}
+
+/* 顶部状态栏 */
+#top-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: rgba(0,0,0,0.3);
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+    flex-shrink: 0;
+}
+
+.stat-item {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 14px;
+}
+
+.stat-item .icon {
+    font-size: 16px;
+}
+
+#advance-day-btn {
+    background: #e94560;
+    border: none;
+    color: white;
+    padding: 4px 12px;
+    border-radius: 12px;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+#advance-day-btn:active {
+    transform: scale(0.95);
+}
+
+/* 主游戏区域 */
+#main-area {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+}
+
+/* 龟缸视图 */
+#tank-view {
+    flex: 1;
+    position: relative;
+    background: linear-gradient(180deg, #87CEEB 0%, #4a90d9 30%, #2d5a87 60%, #1a3a52 100%);
+    margin: 8px;
+    border-radius: 12px;
+    overflow: hidden;
+}
+
+#tank-canvas {
+    width: 100%;
+    height: 100%;
+    display: block;
+}
+
+#tank-info {
+    position: absolute;
+    top: 8px;
+    left: 8px;
+    right: 8px;
+    display: flex;
+    justify-content: space-between;
+    font-size: 12px;
+    color: rgba(255,255,255,0.8);
+    text-shadow: 0 1px 2px rgba(0,0,0,0.5);
+}
+
+
+#water-panel {
+    position: absolute;
+    left: 8px;
+    right: 8px;
+    bottom: 8px;
+    display: grid;
+    grid-template-columns: 1.2fr repeat(4, 1fr);
+    gap: 6px;
+    align-items: center;
+    padding: 8px;
+    border-radius: 12px;
+    background: rgba(3, 7, 18, 0.38);
+    border: 1px solid rgba(255,255,255,0.12);
+    backdrop-filter: blur(6px);
+    color: #e0f2fe;
+    font-size: 11px;
+    pointer-events: none;
+}
+
+.water-panel-title {
+    font-weight: 700;
+    color: #bae6fd;
+}
+
+.water-chip {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 5px 6px;
+    border-radius: 9px;
+    background: rgba(14, 165, 233, 0.16);
+    text-align: center;
+}
+
+.water-chip span {
+    color: #bfdbfe;
+    font-size: 10px;
+}
+
+.water-chip b {
+    font-size: 12px;
+    color: #f8fafc;
+}
+
+#water-panel.warning {
+    border-color: rgba(251, 191, 36, 0.65);
+    background: rgba(69, 45, 10, 0.50);
+}
+
+#water-panel.danger {
+    border-color: rgba(248, 113, 113, 0.75);
+    background: rgba(69, 10, 10, 0.56);
+}
+
+@media (max-width: 380px) {
+    #water-panel {
+        grid-template-columns: repeat(3, 1fr);
+    }
+    .water-panel-title {
+        grid-column: 1 / -1;
+    }
+}
+
+/* 乌龟列表 */
+#turtle-list {
+    display: flex;
+    gap: 8px;
+    padding: 8px 12px;
+    overflow-x: auto;
+    flex-shrink: 0;
+    background: rgba(0,0,0,0.2);
+}
+
+.turtle-card {
+    min-width: 80px;
+    padding: 8px;
+    background: rgba(255,255,255,0.1);
+    border-radius: 10px;
+    text-align: center;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: all 0.2s;
+}
+
+.turtle-card.active {
+    border-color: #e94560;
+    background: rgba(233, 69, 96, 0.2);
+}
+
+.turtle-card:active {
+    transform: scale(0.95);
+}
+
+.turtle-avatar {
+    font-size: 32px;
+    line-height: 1;
+}
+
+.turtle-name {
+    font-size: 11px;
+    margin-top: 4px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.turtle-hunger {
+    margin-top: 4px;
+}
+
+.bar {
+    height: 4px;
+    background: rgba(255,255,255,0.2);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.bar .fill {
+    height: 100%;
+    background: #4ade80;
+    border-radius: 2px;
+    transition: width 0.3s;
+}
+
+.bar .fill.low {
+    background: #ef4444;
+}
+
+.bar .fill.medium {
+    background: #fbbf24;
+}
+
+/* 底部操作栏 */
+#bottom-actions {
+    display: flex;
+    justify-content: space-around;
+    padding: 8px 4px 16px;
+    background: rgba(0,0,0,0.4);
+    border-top: 1px solid rgba(255,255,255,0.1);
+    flex-shrink: 0;
+    padding-bottom: calc(16px + env(safe-area-inset-bottom));
+}
+
+.action-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    background: rgba(255,255,255,0.1);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: #eee;
+    padding: 8px 16px;
+    border-radius: 12px;
+    cursor: pointer;
+    transition: all 0.2s;
+    min-width: 64px;
+}
+
+.action-btn:active {
+    background: rgba(233, 69, 96, 0.3);
+    transform: scale(0.95);
+}
+
+.btn-icon {
+    font-size: 24px;
+}
+
+.btn-text {
+    font-size: 11px;
+}
+
+/* 弹窗 */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0,0,0,0.7);
+    display: flex;
+    align-items: flex-end;
+    justify-content: center;
+    z-index: 100;
+    transition: opacity 0.3s;
+}
+
+.modal.hidden {
+    display: none;
+}
+
+.modal-content {
+    background: #1a1a2e;
+    width: 100%;
+    max-width: 480px;
+    max-height: 70vh;
+    border-radius: 20px 20px 0 0;
+    padding: 20px;
+    overflow-y: auto;
+    animation: slideUp 0.3s ease;
+}
+
+.modal-content.wide {
+    max-height: 85vh;
+}
+
+@keyframes slideUp {
+    from { transform: translateY(100%); }
+    to { transform: translateY(0); }
+}
+
+.modal h3 {
+    text-align: center;
+    margin-bottom: 16px;
+    color: #e94560;
+}
+
+.close-btn {
+    width: 100%;
+    padding: 12px;
+    background: #e94560;
+    border: none;
+    color: white;
+    border-radius: 10px;
+    font-size: 16px;
+    cursor: pointer;
+    margin-top: 16px;
+}
+
+.close-btn:active {
+    opacity: 0.8;
+}
+
+/* 食物列表 */
+.food-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 10px;
+    margin-bottom: 8px;
+    cursor: pointer;
+}
+
+.food-item:active {
+    background: rgba(255,255,255,0.1);
+}
+
+.food-icon {
+    font-size: 28px;
+}
+
+.food-info {
+    flex: 1;
+}
+
+.food-name {
+    font-weight: bold;
+}
+
+.food-count {
+    font-size: 12px;
+    color: #aaa;
+}
+
+/* 详情面板 */
+.detail-stat {
+    display: flex;
+    justify-content: space-between;
+    padding: 8px 0;
+    border-bottom: 1px solid rgba(255,255,255,0.1);
+}
+
+.detail-stat label {
+    color: #aaa;
+}
+
+.detail-bar {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 8px 0;
+}
+
+.detail-bar .bar {
+    flex: 1;
+    height: 8px;
+}
+
+.detail-bar span {
+    font-size: 12px;
+    min-width: 30px;
+    text-align: right;
+}
+
+/* 图鉴 */
+.species-card {
+    display: flex;
+    gap: 12px;
+    padding: 12px;
+    background: rgba(255,255,255,0.05);
+    border-radius: 10px;
+    margin-bottom: 8px;
+}
+
+.species-card.locked {
+    opacity: 0.5;
+}
+
+.species-emoji {
+    font-size: 40px;
+}
+
+.species-info {
+    flex: 1;
+}
+
+.species-name {
+    font-weight: bold;
+    font-size: 16px;
+}
+
+.species-category {
+    font-size: 12px;
+    color: #aaa;
+    margin-top: 2px;
+}
+
+.species-desc {
+    font-size: 13px;
+    color: #ccc;
+    margin-top: 4px;
+}
+
+.species-unlock {
+    font-size: 12px;
+    color: #fbbf24;
+    margin-top: 4px;
+}
+
+
+/* 维护 / 布景 */
+.maintenance-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    margin-bottom: 10px;
+    cursor: pointer;
+}
+
+.maintenance-item.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.maintenance-item:not(.disabled):active {
+    background: rgba(56, 189, 248, 0.18);
+    transform: scale(0.99);
+}
+
+.maintenance-icon {
+    font-size: 30px;
+}
+
+.maintenance-info {
+    flex: 1;
+}
+
+.maintenance-name {
+    font-weight: 700;
+}
+
+.maintenance-desc {
+    font-size: 12px;
+    color: #aaa;
+    margin-top: 3px;
+    line-height: 1.35;
+}
+
+.maintenance-cost {
+    color: #fbbf24;
+    font-weight: 700;
+    font-size: 12px;
+}
+
+/* 布景 */
+.modal-tip {
+    font-size: 13px;
+    line-height: 1.5;
+    color: #cbd5e1;
+    text-align: center;
+    margin: -4px 0 14px;
+}
+
+.decor-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: rgba(255,255,255,0.05);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    margin-bottom: 10px;
+    cursor: pointer;
+}
+
+.decor-item:active {
+    background: rgba(233, 69, 96, 0.18);
+    transform: scale(0.99);
+}
+
+.decor-icon {
+    font-size: 30px;
+}
+
+.decor-info {
+    flex: 1;
+}
+
+.decor-name {
+    font-weight: 700;
+}
+
+.decor-desc {
+    font-size: 12px;
+    color: #aaa;
+    margin-top: 3px;
+}
+
+#tank-canvas {
+    touch-action: none;
+}
+
+#tank-canvas.dragging {
+    cursor: grabbing;
+}
+
+/* Toast */
+#toast {
+    position: fixed;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    background: rgba(0,0,0,0.8);
+    color: white;
+    padding: 12px 24px;
+    border-radius: 20px;
+    font-size: 14px;
+    z-index: 200;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s;
+}
+
+#toast.show {
+    opacity: 1;
+}
+
+/* 滚动条美化 */
+::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.2);
+    border-radius: 2px;
+}
+
+/* 龟缸切换：M4 多龟多缸入口 */
+#tank-tabs {
+    display: flex;
+    gap: 8px;
+    padding: 8px 12px 4px;
+    overflow-x: auto;
+    background: rgba(0,0,0,0.16);
+    flex-shrink: 0;
+}
+
+.tank-tab {
+    min-width: 112px;
+    padding: 8px 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.14);
+    background: rgba(255,255,255,0.08);
+    color: #e5e7eb;
+    text-align: left;
+    cursor: pointer;
+}
+
+.tank-tab.active {
+    border-color: #38bdf8;
+    background: rgba(56, 189, 248, 0.2);
+    box-shadow: 0 0 0 1px rgba(56, 189, 248, 0.18) inset;
+}
+
+.tank-tab:active {
+    transform: scale(0.98);
+}
+
+.tank-tab-name,
+.tank-tab-meta {
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.tank-tab-name {
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.tank-tab-meta {
+    margin-top: 3px;
+    font-size: 10px;
+    color: #bae6fd;
+}
+
+.buy-species-btn {
+    margin-top: 8px;
+    padding: 7px 10px;
+    border: none;
+    border-radius: 10px;
+    background: #38bdf8;
+    color: #082f49;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.buy-species-btn:active {
+    transform: scale(0.98);
+}
+
+.species-owned {
+    margin-top: 6px;
+    font-size: 12px;
+    color: #86efac;
+}
+
+.turtle-tank {
+    font-size: 10px;
+    color: #9ca3af;
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* 龟缸管理 / 搬家 */
+#tank-manage-btn {
+    margin: 4px 12px 6px;
+    padding: 9px 12px;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    border-radius: 12px;
+    background: rgba(14, 165, 233, 0.14);
+    color: #dff7ff;
+    font-weight: 700;
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+#tank-manage-btn:active {
+    transform: scale(0.98);
+    background: rgba(14, 165, 233, 0.24);
+}
+
+.section-title {
+    margin: 12px 0 10px;
+    color: #bae6fd;
+    font-size: 14px;
+}
+
+.tank-manage-item,
+.move-row {
+    padding: 12px;
+    margin-bottom: 10px;
+    border-radius: 12px;
+    border: 1px solid rgba(255,255,255,0.08);
+    background: rgba(255,255,255,0.05);
+}
+
+.tank-manage-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    cursor: pointer;
+}
+
+.tank-manage-item.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
+.tank-manage-item:not(.disabled):active {
+    background: rgba(56, 189, 248, 0.18);
+    transform: scale(0.99);
+}
+
+.tank-manage-icon {
+    font-size: 30px;
+}
+
+.tank-manage-info {
+    flex: 1;
+}
+
+.tank-manage-name,
+.move-row-title {
+    font-weight: 700;
+}
+
+.tank-manage-desc,
+.move-current,
+.move-row-title span {
+    margin-top: 4px;
+    color: #aab4c3;
+    font-size: 12px;
+    line-height: 1.35;
+}
+
+.move-targets {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 9px;
+}
+
+.move-target-btn {
+    padding: 6px 9px;
+    border: 1px solid rgba(56, 189, 248, 0.35);
+    border-radius: 999px;
+    background: rgba(56, 189, 248, 0.12);
+    color: #e0f2fe;
+    font-size: 12px;
+    cursor: pointer;
+}
+
+.move-target-btn.active {
+    border-color: rgba(74, 222, 128, 0.75);
+    background: rgba(22, 163, 74, 0.25);
+    color: #bbf7d0;
+}
+
+.move-target-btn.disabled {
+    opacity: 0.35;
+    cursor: not-allowed;
+}
+
+.empty-tip {
+    text-align: center;
+    color: #94a3b8;
+    font-size: 13px;
+    padding: 12px;
+}
+
+/* M1 像素龟外观：图鉴/卡片使用同一套迷你像素头像，避免所有龟都只显示通用 emoji。 */
+.mini-turtle {
+    --shell: #344f26;
+    --shell-hi: #5d7f36;
+    --skin: #536f38;
+    --stripe: #c6d27a;
+    --rim: #24351a;
+    position: relative;
+    display: inline-block;
+    width: 42px;
+    height: 32px;
+    image-rendering: pixelated;
+    vertical-align: middle;
+    filter: drop-shadow(0 2px 0 rgba(0,0,0,0.2));
+}
+
+.mini-turtle .mini-shell {
+    position: absolute;
+    left: 7px;
+    top: 8px;
+    width: 24px;
+    height: 18px;
+    background: var(--shell);
+    border: 3px solid var(--rim);
+    border-radius: 45% 45% 38% 38%;
+    box-shadow:
+        inset 0 4px 0 var(--shell-hi),
+        inset 9px 0 0 rgba(0,0,0,0.12),
+
+        -7px -1px 0 -2px var(--skin),
+        -7px 13px 0 -2px var(--skin),
+        8px -2px 0 -2px var(--skin),
+        7px 14px 0 -2px var(--skin),
+        -10px 7px 0 -3px var(--skin);
+}
+
+.mini-turtle .mini-shell::before {
+    content: '';
+    position: absolute;
+    left: 8px;
+    top: 1px;
+    width: 3px;
+    height: 14px;
+    background: var(--stripe);
+    box-shadow: -6px 6px 0 -1px rgba(0,0,0,0.2), 7px 6px 0 -1px rgba(0,0,0,0.2);
+}
+
+.mini-turtle .mini-head {
+    position: absolute;
+    right: 1px;
+    top: 10px;
+    width: 12px;
+    height: 11px;
+    background: var(--skin);
+    border-radius: 35% 55% 45% 35%;
+    box-shadow: inset 0 -3px 0 var(--stripe);
+}
+
+.mini-turtle .mini-head::after {
+    content: '';
+    position: absolute;
+    right: 2px;
+    top: 3px;
+    width: 2px;
+    height: 2px;
+    background: #020617;
+    box-shadow: 1px 0 0 #f8fafc;
+}
+
+.mini-turtle-musk {
+    --shell: #26381f; --shell-hi: #40592e; --skin: #486438; --stripe: #f2d16b; --rim: #172415;
+    transform: scale(0.92);
+}
+
+.mini-turtle-razor {
+    --shell: #42311f; --shell-hi: #6b5730; --skin: #57462d; --stripe: #d7bd74; --rim: #21170f;
+}
+.mini-turtle-razor .mini-shell {
+    border-radius: 42% 42% 28% 28%;
+    box-shadow:
+        inset 0 2px 0 var(--shell-hi),
+        inset 11px 0 0 rgba(0,0,0,0.12),
+        0 -5px 0 -2px var(--stripe),
+        -7px -1px 0 -2px var(--skin),
+        -7px 13px 0 -2px var(--skin),
+        8px -2px 0 -2px var(--skin),
+        7px 14px 0 -2px var(--skin),
+        -10px 7px 0 -3px var(--skin);
+}
+
+.mini-turtle-pond {
+    --shell: #344f26; --shell-hi: #5d7f36; --skin: #536f38; --stripe: #c6d27a; --rim: #24351a;
+}
+.mini-turtle-pond .mini-shell::before {
+    box-shadow: -7px 5px 0 -1px var(--stripe), 7px 7px 0 -1px var(--stripe), 0 9px 0 -1px rgba(0,0,0,0.22);
+}
+
+.mini-turtle-yellowpond {
+    --shell: #6a5a28; --shell-hi: #9a8138; --skin: #707b3b; --stripe: #ffd75f; --rim: #3f351a;
+}
+
+.mini-turtle-margin {
+    --shell: #5b3420; --shell-hi: #8a4d28; --skin: #715033; --stripe: #ffbf4b; --rim: #f0a531;
+}
+.mini-turtle-margin .mini-shell {
+    border-radius: 34% 34% 28% 28%;
+}
+
+.turtle-avatar .mini-turtle {
+    width: 38px;
+    height: 30px;
+}
+
+.species-emoji .mini-turtle {
+    width: 46px;
+    height: 36px;
+}
