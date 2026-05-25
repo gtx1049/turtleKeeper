@@ -1,0 +1,34 @@
+{
+  "muskTurtle": {
+    "name": "麝香龟",
+    "sprite": "sprites/muskTurtle.png"
+  },
+  "razorbackTurtle": {
+    "name": "剃刀龟",
+    "sprite": "sprites/razorbackTurtle.png"
+  },
+  "loggerheadMuskTurtle": {
+    "name": "果核泥龟",
+    "sprite": "sprites/loggerheadMuskTurtle.png"
+  },
+  "yellowMarginTurtle": {
+    "name": "黄缘闭壳龟",
+    "sprite": "sprites/yellowMarginTurtle.png"
+  },
+  "chinesePondTurtle": {
+    "name": "中华草龟",
+    "sprite": "sprites/chinesePondTurtle.png"
+  },
+  "yellowPondTurtle": {
+    "name": "黄喉拟水龟",
+    "sprite": "sprites/yellowPondTurtle.png"
+  },
+  "chineseStripeTurtle": {
+    "name": "花龟",
+    "sprite": "sprites/chineseStripeTurtle.png"
+  },
+  "redEaredSlider": {
+    "name": "巴西龟",
+    "sprite": "sprites/redEaredSlider.png"
+  }
+}

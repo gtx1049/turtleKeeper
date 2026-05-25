@@ -217,7 +217,16 @@ function getTurtleVisual(species) {
     return visuals[species] || visuals.chinesePondTurtle;
 }
 
+// M1 像素龟 sprite 列表（程序化生成，详见 scripts/gen_pixel_turtles.py）
+const SPRITE_SPECIES = new Set([
+    'muskTurtle','razorbackTurtle','loggerheadMuskTurtle','yellowMarginTurtle',
+    'chinesePondTurtle','yellowPondTurtle','chineseStripeTurtle','redEaredSlider'
+]);
+
 function getTurtleAvatarMarkup(species) {
+    if (SPRITE_SPECIES.has(species)) {
+        return `<img class="mini-turtle-sprite" src="sprites/${species}.png" alt="${species}" loading="lazy">`;
+    }
     const v = getTurtleVisual(species);
     return `<span class="mini-turtle mini-turtle-${v.slug}" title="${v.label}"><span class="mini-shell"></span><span class="mini-head"></span></span>`;
 }

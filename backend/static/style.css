@@ -776,6 +776,16 @@ body {
     filter: drop-shadow(0 2px 0 rgba(0,0,0,0.2));
 }
 
+/* M1 像素龟 sprite（程序化生成，8 个龟种）*/
+.mini-turtle-sprite {
+    width: 42px;
+    height: 42px;
+    object-fit: contain;
+    image-rendering: pixelated;
+    vertical-align: middle;
+    filter: drop-shadow(0 2px 0 rgba(0,0,0,0.2));
+}
+
 .mini-turtle .mini-shell {
     position: absolute;
     left: 7px;
