@@ -529,6 +529,27 @@ body {
     margin-top: 3px;
 }
 
+.decor-tags {
+    font-size: 11px;
+    color: #f4d03f;
+    margin-top: 4px;
+    letter-spacing: 0.3px;
+}
+
+.decor-name .decor-cost {
+    margin-left: 6px;
+    font-size: 11px;
+    padding: 1px 6px;
+    border-radius: 8px;
+    background: rgba(244,208,63,0.18);
+    color: #f4d03f;
+    font-weight: 600;
+}
+.decor-name .decor-cost.free {
+    background: rgba(150,200,150,0.18);
+    color: #b3ecb3;
+}
+
 #tank-canvas {
     touch-action: none;
 }

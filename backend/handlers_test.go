@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"testing"
 )
@@ -133,6 +134,83 @@ func contains(s, sub string) bool {
 		}
 	}
 	return false
+}
+
+func TestDecorCatalog(t *testing.T) {
+	cat := decorCatalog()
+	if len(cat) < 4 {
+		t.Fatalf("expected >=4 decor specs, got %d", len(cat))
+	}
+	if _, ok := findDecorSpec("sponge"); !ok {
+		t.Error("expected sponge in catalog")
+	}
+	if _, ok := findDecorSpec("heater"); !ok {
+		t.Error("expected heater in catalog")
+	}
+	if _, ok := findDecorSpec("unknown_xyz"); ok {
+		t.Error("unknown decor should not be found")
+	}
+	sponge, _ := findDecorSpec("sponge")
+	if sponge.FilterBoost <= 0 || sponge.Cost <= 0 {
+		t.Errorf("sponge should have filter_boost>0 and cost>0, got %+v", sponge)
+	}
+	stone, _ := findDecorSpec("stone")
+	if !stone.Basking {
+		t.Errorf("stone should be basking, got %+v", stone)
+	}
+	wood, _ := findDecorSpec("wood")
+	if !wood.Shelter {
+		t.Errorf("wood should be shelter, got %+v", wood)
+	}
+}
+
+// TestSummarizeDecorEffects 验证 decor 效果汇总 + 上限防爆
+func TestSummarizeDecorEffects(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "tkeeper_decor_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+	if err := initDB(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, _ = db.Exec("INSERT INTO players (id, coins, day, season) VALUES (?, 500, 1, 'spring')", "p_decor")
+	_, _ = db.Exec("INSERT INTO tanks (id, player_id, shape, name, water_level) VALUES (?, ?, 'square', 'T', 'middle')", "tank_x", "p_decor")
+
+	fb, cb, basking, shelter := summarizeDecorEffects("tank_x")
+	if fb != 0 || cb != 0 || basking || shelter {
+		t.Errorf("empty tank should be zero, got %v %v %v %v", fb, cb, basking, shelter)
+	}
+
+	for _, typ := range []string{"wood", "stone", "sponge"} {
+		_, err := db.Exec("INSERT INTO decor (id, tank_id, type, x, y) VALUES (?, ?, ?, 0.5, 0.5)", "d_"+typ, "tank_x", typ)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	fb, cb, basking, shelter = summarizeDecorEffects("tank_x")
+	if !basking || !shelter {
+		t.Errorf("expected basking & shelter, got basking=%v shelter=%v", basking, shelter)
+	}
+	if fb <= 0 {
+		t.Errorf("expected filterBoost>0, got %v", fb)
+	}
+	if cb < 1 {
+		t.Errorf("expected clarityBoost>=1, got %v", cb)
+	}
+
+	for i := 0; i < 10; i++ {
+		_, _ = db.Exec("INSERT INTO decor (id, tank_id, type, x, y) VALUES (?, ?, 'sponge', 0.5, 0.5)", fmt.Sprintf("d_sp_%d", i), "tank_x")
+	}
+	fb, cb, _, _ = summarizeDecorEffects("tank_x")
+	if fb > 0.45 {
+		t.Errorf("filterBoost should cap at 0.45, got %v", fb)
+	}
+	if cb > 4 {
+		t.Errorf("clarityBoost should cap at 4, got %v", cb)
+	}
 }
 
 // TestComputeDailyIncome 用临时 sqlite 数据库验证收益逻辑

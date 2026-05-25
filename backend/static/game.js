@@ -418,6 +418,15 @@ function drawDecor(w, h) {
             case 'plant':
                 drawPlant(ctx);
                 break;
+            case 'sponge':
+                drawSponge(ctx);
+                break;
+            case 'heater':
+                drawHeater(ctx);
+                break;
+            case 'driftwood_basking':
+                drawDriftwoodBasking(ctx);
+                break;
         }
         
         ctx.restore();
@@ -460,6 +469,76 @@ function drawPlant(ctx) {
             Math.sin(angle) * 25 - 40
         );
         ctx.stroke();
+    }
+}
+
+// M3 新增：生化海绵（软过滤）
+function drawSponge(ctx) {
+    // 主体：黄色海绵方块 + 多孔细节
+    ctx.fillStyle = '#f4d03f';
+    ctx.fillRect(-18, -14, 36, 22);
+    ctx.fillStyle = '#d4ac0d';
+    for (let i = 0; i < 8; i++) {
+        const x = -14 + (i % 4) * 9;
+        const y = -10 + Math.floor(i / 4) * 9;
+        ctx.beginPath();
+        ctx.arc(x, y, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    // 顶部气泡进水嵼口、发出气法帕帕的过滤含义
+    ctx.fillStyle = '#5dade2';
+    for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(-8 + i * 8, -18 - (Date.now() / 200 + i) % 6, 1.5, 0, Math.PI * 2);
+        ctx.fill();
+    }
+}
+
+// M3 新增：加热棒
+function drawHeater(ctx) {
+    // 垂直玻璃管
+    ctx.fillStyle = 'rgba(220, 220, 220, 0.85)';
+    ctx.fillRect(-4, -28, 8, 50);
+    ctx.strokeStyle = '#888';
+    ctx.lineWidth = 1;
+    ctx.strokeRect(-4, -28, 8, 50);
+    // 内部发热丝
+    ctx.fillStyle = '#e74c3c';
+    ctx.fillRect(-1, -22, 2, 38);
+    // 顶部接头
+    ctx.fillStyle = '#333';
+    ctx.fillRect(-6, -32, 12, 5);
+    // 发热微光（闪烁）
+    const glow = 0.4 + 0.2 * Math.sin(Date.now() / 400);
+    ctx.fillStyle = `rgba(231, 76, 60, ${glow})`;
+    ctx.beginPath();
+    ctx.arc(0, -3, 10, 0, Math.PI * 2);
+    ctx.fill();
+}
+
+// M3 新增：高级沉木晒台（sun沉木上面露出水面的部分）
+function drawDriftwoodBasking(ctx) {
+    // 主木干（横跳到水面以上）
+    ctx.fillStyle = '#8B4513';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, 36, 12, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 上层亮色被晒部分
+    ctx.fillStyle = '#a0673a';
+    ctx.beginPath();
+    ctx.ellipse(0, -6, 30, 6, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 右侧留一些根结
+    ctx.fillStyle = '#5d3a1a';
+    ctx.beginPath();
+    ctx.ellipse(28, 4, 8, 4, 0.3, 0, Math.PI * 2);
+    ctx.fill();
+    // 一丛香萄林 / 青苔 补个生机
+    ctx.fillStyle = '#3a8a3a';
+    for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.arc(-15 + i * 10, -10, 2 + (i % 2), 0, Math.PI * 2);
+        ctx.fill();
     }
 }
 
@@ -717,24 +796,43 @@ async function showDecorModal() {
         return;
     }
 
+async function showDecorMenu() {
     const modal = document.getElementById('decor-modal');
     const list = document.getElementById('decor-list');
     list.innerHTML = '';
 
-    const decorOptions = [
-        { type: 'wood', name: '沉木', icon: '🪵', desc: '适合麝香龟躲藏，缸里更有层次。' },
-        { type: 'stone', name: '晒台石', icon: '🪨', desc: '给草龟歇脚，也能打破空缸感。' },
-        { type: 'plant', name: '水草丛', icon: '🌿', desc: '增加安全感，画面更鲜活。' },
-    ];
+    let decorOptions = [];
+    try {
+        const res = await fetch(`${API_BASE}/api/decor-catalog`);
+        if (res.ok) decorOptions = await res.json();
+    } catch (e) {
+        console.warn('拉 decor-catalog 失败，回退默认三件套', e);
+    }
+    if (!decorOptions.length) {
+        decorOptions = [
+            { type: 'wood', name: '沉木', icon: '🪵', desc: '适合麝香龟躲藏，缸里更有层次。', cost: 0 },
+            { type: 'stone', name: '晒台石', icon: '🪨', desc: '给草龟歇脚，也能打破空缸感。', cost: 0 },
+            { type: 'plant', name: '水草丛', icon: '🌿', desc: '增加安全感，画面更鲜活。', cost: 0 },
+        ];
+    }
 
     decorOptions.forEach(option => {
         const item = document.createElement('div');
         item.className = 'decor-item';
+        const cost = Number(option.cost || 0);
+        const tagBits = [];
+        if (option.basking) tagBits.push('☀️晒台');
+        if (option.shelter) tagBits.push('🌳躲藏');
+        if (option.filter_boost) tagBits.push(`💧-${Math.round(option.filter_boost * 100)}%水衰`);
+        if (option.clarity_boost) tagBits.push(`✨+${option.clarity_boost}清澈/天`);
+        const tags = tagBits.length ? `<div class="decor-tags">${tagBits.join(' · ')}</div>` : '';
+        const costLabel = cost > 0 ? `<span class="decor-cost">🪙 ${cost}</span>` : `<span class="decor-cost free">免费</span>`;
         item.innerHTML = `
             <span class="decor-icon">${option.icon}</span>
             <div class="decor-info">
-                <div class="decor-name">${option.name}</div>
+                <div class="decor-name">${option.name} ${costLabel}</div>
                 <div class="decor-desc">${option.desc}</div>
+                ${tags}
             </div>
         `;
         item.addEventListener('click', () => addDecor(option.type));
@@ -745,13 +843,26 @@ async function showDecorModal() {
 }
 
 async function addDecor(type) {
+    // 不同布景默认放置位置不同：设备类留在中层，造景类在缸底
+    const defaultY = {
+        plant: 0.82,
+        heater: 0.55,
+        sponge: 0.18,
+        driftwood_basking: 0.30,
+    }[type] || 0.78;
+    const defaultScale = {
+        plant: 0.9,
+        heater: 1.0,
+        sponge: 1.0,
+        driftwood_basking: 1.0,
+    }[type] || 1;
     const newDecor = {
         id: `decor_${Date.now()}`,
         type,
         x: 0.25 + Math.random() * 0.5,
-        y: type === 'plant' ? 0.82 : 0.78,
+        y: defaultY,
         rotation: (Math.random() - 0.5) * 0.25,
-        scale: type === 'plant' ? 0.9 : 1,
+        scale: defaultScale,
     };
 
     try {
@@ -768,7 +879,7 @@ async function addDecor(type) {
         if (!res.ok) throw new Error(await res.text());
         const data = await res.json();
         decor.push(data.decor || newDecor);
-        showToast('布景已放入龟缸，拖动可调整位置 +20龟币');
+        showToast('布景已放入龟缸，拖动可调整位置');
         closeAllModals();
         await loadGameState();
     } catch (e) {
@@ -807,8 +918,12 @@ function getCanvasPoint(e) {
 function findDecorAt(point) {
     for (let i = decor.length - 1; i >= 0; i--) {
         const d = decor[i];
-        const hitW = d.type === 'plant' ? 0.10 : 0.14;
-        const hitH = d.type === 'plant' ? 0.16 : 0.10;
+        let hitW = 0.14;
+        let hitH = 0.10;
+        if (d.type === 'plant') { hitW = 0.10; hitH = 0.16; }
+        else if (d.type === 'heater') { hitW = 0.06; hitH = 0.20; }
+        else if (d.type === 'driftwood_basking') { hitW = 0.18; hitH = 0.08; }
+        else if (d.type === 'sponge') { hitW = 0.12; hitH = 0.10; }
         if (Math.abs(point.x - d.x) <= hitW && Math.abs(point.y - d.y) <= hitH) {
             return d;
         }

@@ -80,6 +80,81 @@ type DecorItem struct {
 	Scale    float64 `json:"scale"`
 }
 
+// DecorSpec 描述一种布景的元信息与游戏效果（M3 布景=机制）。
+// effects 字段会被 advance-day 读取，把美观与玩法绑在一起。
+type DecorSpec struct {
+	Type       string  `json:"type"`
+	Name       string  `json:"name"`
+	Icon       string  `json:"icon"`
+	Desc       string  `json:"desc"`
+	Cost       int     `json:"cost"`
+	Category   string  `json:"category"` // shelter / equipment / plant / basking
+	// 玩法效果：
+	FilterBoost  float64 `json:"filter_boost,omitempty"`  // 降低水质衰减系数（0~1，越大越稳）
+	ClarityBoost int     `json:"clarity_boost,omitempty"` // 每天清澈度回补
+	Basking      bool    `json:"basking,omitempty"`       // 提供晒台（半水龟/水龟受益）
+	Shelter      bool    `json:"shelter,omitempty"`       // 提供躲藏（提升心情）
+}
+
+// decorCatalog 是布景白名单（含 M3 新加的设备类）。
+// handleAddDecor 用它校验 type、并在前端 /api/decor-catalog 暴露。
+func decorCatalog() []DecorSpec {
+	return []DecorSpec{
+		{Type: "wood", Name: "沉木", Icon: "🪵", Desc: "麝香龟最爱钻洞，提升躲藏感。", Cost: 0, Category: "shelter", Shelter: true},
+		{Type: "stone", Name: "晒台石", Icon: "🪨", Desc: "半水龟歇脚晒背的专属位。", Cost: 0, Category: "basking", Basking: true},
+		{Type: "plant", Name: "水草丛", Icon: "🌿", Desc: "少量降氨吸硝，画面也更鲜活。", Cost: 0, Category: "plant"},
+		{Type: "sponge", Name: "生化海绵", Icon: "🧽", Desc: "软过滤：没装过滤器的缸也能稳水。", Cost: 40, Category: "equipment", FilterBoost: 0.30, ClarityBoost: 1},
+		{Type: "heater", Name: "加热棒", Icon: "🌡️", Desc: "冬天不掉温，半水龟体感舒适。", Cost: 60, Category: "equipment", FilterBoost: 0.10},
+		{Type: "driftwood_basking", Name: "沉木晒台", Icon: "🪜", Desc: "高级晒台 + 躲藏二合一。", Cost: 80, Category: "basking", Basking: true, Shelter: true},
+	}
+}
+
+// findDecorSpec O(n) 查表，类型有限不需要 map
+func findDecorSpec(typ string) (DecorSpec, bool) {
+	for _, d := range decorCatalog() {
+		if d.Type == typ {
+			return d, true
+		}
+	}
+	return DecorSpec{}, false
+}
+
+// summarizeDecorEffects 把当前缸里的 decor 聚合成总效果，
+// 供 advancePlayerTanks/Turtles 使用。
+func summarizeDecorEffects(tankID string) (filterBoost float64, clarityBoost int, hasBasking, hasShelter bool) {
+	rows, err := db.Query("SELECT type FROM decor WHERE tank_id = ?", tankID)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var typ string
+		if err := rows.Scan(&typ); err != nil {
+			continue
+		}
+		spec, ok := findDecorSpec(typ)
+		if !ok {
+			continue
+		}
+		filterBoost += spec.FilterBoost
+		clarityBoost += spec.ClarityBoost
+		if spec.Basking {
+			hasBasking = true
+		}
+		if spec.Shelter {
+			hasShelter = true
+		}
+	}
+	// 上限防爆
+	if filterBoost > 0.45 {
+		filterBoost = 0.45
+	}
+	if clarityBoost > 4 {
+		clarityBoost = 4
+	}
+	return
+}
+
 // InventoryItem 背包物品
 type InventoryItem struct {
 	ID    string `json:"id"`
@@ -705,6 +780,23 @@ func handleAddDecor(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "tank_id and decor.type required", http.StatusBadRequest)
 		return
 	}
+	spec, specOK := findDecorSpec(req.Decor.Type)
+	if !specOK {
+		http.Error(w, "unknown decor type: "+req.Decor.Type, http.StatusBadRequest)
+		return
+	}
+	// 检查越限购买（cost > 0 的类需要扣龟币）
+	if spec.Cost > 0 {
+		var coins int
+		if err := db.QueryRow("SELECT coins FROM players WHERE id = ?", req.PlayerID).Scan(&coins); err != nil {
+			http.Error(w, "player not found", http.StatusBadRequest)
+			return
+		}
+		if coins < spec.Cost {
+			http.Error(w, fmt.Sprintf("龟币不足，需要 %d", spec.Cost), http.StatusBadRequest)
+			return
+		}
+	}
 	if req.Decor.ID == "" {
 		req.Decor.ID = fmt.Sprintf("decor_%d", time.Now().UnixNano())
 	}
@@ -730,9 +822,21 @@ func handleAddDecor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 扣除 cost（如果有）
+	if spec.Cost > 0 {
+		db.Exec("UPDATE players SET coins = coins - ? WHERE id = ?", spec.Cost, req.PlayerID)
+	}
+	// 装上海绵同步点亮 has_filter（软过滤也算过滤）。拳头产品。
+	if req.Decor.Type == "sponge" {
+		db.Exec("UPDATE tanks SET has_filter = 1 WHERE id = ? AND player_id = ?", req.TankID, req.PlayerID)
+	}
+
 	// 第一次布景奖励：给一点龟币和成就反馈，让系统有正向循环。
 	db.Exec("UPDATE achievements SET unlocked = 1, unlock_day = (SELECT day FROM players WHERE id = ?) WHERE player_id = ? AND id = 'ach_4' AND unlocked = 0", req.PlayerID, req.PlayerID)
-	db.Exec("UPDATE players SET coins = coins + 20 WHERE id = ?", req.PlayerID)
+	// 免费装饰品才送龟币，避免装备送贺雙获利
+	if spec.Cost == 0 {
+		db.Exec("UPDATE players SET coins = coins + 20 WHERE id = ?", req.PlayerID)
+	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "decor": req.Decor})
@@ -958,6 +1062,9 @@ func advancePlayerTanks(playerID string) error {
 		db.QueryRow("SELECT COUNT(*) FROM turtles WHERE player_id = ? AND tank_id = ?", playerID, tank.ID).Scan(&turtleCount)
 		db.QueryRow("SELECT COUNT(*) FROM decor WHERE tank_id = ? AND type = 'plant'", tank.ID).Scan(&plantCount)
 
+		// M3 布景=机制：设备类布景对水质衰减的叠加补助。
+		decorFilter, decorClarity, _, _ := summarizeDecorEffects(tank.ID)
+
 		bioLoad := 1.0 + float64(maxInt(0, turtleCount-1))*0.35
 		filterFactor := 1.0
 		clarityDrop := 4
@@ -965,10 +1072,14 @@ func advancePlayerTanks(playerID string) error {
 			filterFactor = 0.55
 			clarityDrop = 2
 		}
+		// 软过滤/加热棒进一步压低衰减系数
+		if decorFilter > 0 {
+			filterFactor = clampFloat(filterFactor-decorFilter, 0.20, 1.0)
+		}
 		plantBonus := float64(minInt(3, plantCount)) * 0.08
 		ammonia := clampFloat(tank.Ammonia+(0.12*bioLoad*filterFactor)-plantBonus, 0, 5)
 		nitrite := clampFloat(tank.Nitrite+(0.06*bioLoad*filterFactor)-plantBonus*0.5, 0, 5)
-		clarity := clampInt(tank.Clarity-clarityDrop-turtleCount+plantCount, 0, 100)
+		clarity := clampInt(tank.Clarity-clarityDrop-turtleCount+plantCount+decorClarity, 0, 100)
 
 		if _, err := db.Exec("UPDATE tanks SET ammonia = ?, nitrite = ?, clarity = ? WHERE id = ?", ammonia, nitrite, clarity, tank.ID); err != nil {
 			return err
@@ -1013,12 +1124,13 @@ func advancePlayerTurtles(playerID string) error {
 	type turtleDecay struct {
 		ID      string
 		TankID  string
+		Species string
 		Ammonia float64
 		Nitrite float64
 		Clarity int
 	}
 
-	rows, err := db.Query(`SELECT t.id, t.tank_id, COALESCE(tk.ammonia, 0), COALESCE(tk.nitrite, 0), COALESCE(tk.clarity, 100)
+	rows, err := db.Query(`SELECT t.id, t.tank_id, t.species, COALESCE(tk.ammonia, 0), COALESCE(tk.nitrite, 0), COALESCE(tk.clarity, 100)
 		FROM turtles t LEFT JOIN tanks tk ON t.tank_id = tk.id
 		WHERE t.player_id = ?`, playerID)
 	if err != nil {
@@ -1028,7 +1140,7 @@ func advancePlayerTurtles(playerID string) error {
 	var turtles []turtleDecay
 	for rows.Next() {
 		var t turtleDecay
-		if err := rows.Scan(&t.ID, &t.TankID, &t.Ammonia, &t.Nitrite, &t.Clarity); err != nil {
+		if err := rows.Scan(&t.ID, &t.TankID, &t.Species, &t.Ammonia, &t.Nitrite, &t.Clarity); err != nil {
 			rows.Close()
 			return err
 		}
@@ -1040,6 +1152,22 @@ func advancePlayerTurtles(playerID string) error {
 	}
 	rows.Close()
 
+	// 缓存每个缸的 decor 汇总，避免同一个缸多次查
+	tankSummary := map[string]struct {
+		hasBasking bool
+		hasShelter bool
+	}{}
+	for _, turtle := range turtles {
+		if _, ok := tankSummary[turtle.TankID]; ok {
+			continue
+		}
+		_, _, basking, shelter := summarizeDecorEffects(turtle.TankID)
+		tankSummary[turtle.TankID] = struct {
+			hasBasking bool
+			hasShelter bool
+		}{basking, shelter}
+	}
+
 	for _, turtle := range turtles {
 		moodDrop := 3
 		cleanDrop := 5
@@ -1050,6 +1178,17 @@ func advancePlayerTurtles(playerID string) error {
 		}
 		if turtle.Ammonia >= 1.0 || turtle.Nitrite >= 0.8 || turtle.Clarity < 45 {
 			healthDrop = 2
+		}
+
+		// M3 布景效果：适合中/陕水位龟种的晒台反馈
+		summary := tankSummary[turtle.TankID]
+		sp, hasSp := findSpecies(turtle.Species)
+		if hasSp && summary.hasBasking && (sp.HabitatType == "middle" || sp.HabitatType == "land") {
+			moodDrop = maxInt(0, moodDrop-2)
+			cleanDrop = maxInt(0, cleanDrop-1)
+		}
+		if summary.hasShelter {
+			moodDrop = maxInt(0, moodDrop-1)
 		}
 
 		_, err := db.Exec(`UPDATE turtles SET
@@ -1130,6 +1269,12 @@ func findSpecies(speciesID string) (SpeciesInfo, bool) {
 func handleGetSpecies(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(speciesCatalog())
+}
+
+// handleGetDecorCatalog 返回 M3 布景白名单，前端不再写死。
+func handleGetDecorCatalog(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(decorCatalog())
 }
 
 func handleBuySpecies(w http.ResponseWriter, r *http.Request) {
