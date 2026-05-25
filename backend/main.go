@@ -29,19 +29,19 @@ func main() {
 	fs := http.FileServer(http.Dir(staticDir))
 	http.Handle("/", fs)
 
-	// API 路由
+	// API 路由：统一通过 ensurePlayerMiddleware，避免写 API 冷启动后遇到 player not found。
 	http.HandleFunc("/api/state", handleGetState)
-	http.HandleFunc("/api/feed", handleFeed)
-	http.HandleFunc("/api/clean", handleClean)
-	http.HandleFunc("/api/maintain-tank", handleMaintainTank)
-	http.HandleFunc("/api/interact", handleInteract)
-	http.HandleFunc("/api/add-decor", handleAddDecor)
-	http.HandleFunc("/api/move-decor", handleMoveDecor)
-	http.HandleFunc("/api/advance-day", handleAdvanceDay)
+	http.HandleFunc("/api/feed", ensurePlayerMiddleware(handleFeed))
+	http.HandleFunc("/api/clean", ensurePlayerMiddleware(handleClean))
+	http.HandleFunc("/api/maintain-tank", ensurePlayerMiddleware(handleMaintainTank))
+	http.HandleFunc("/api/interact", ensurePlayerMiddleware(handleInteract))
+	http.HandleFunc("/api/add-decor", ensurePlayerMiddleware(handleAddDecor))
+	http.HandleFunc("/api/move-decor", ensurePlayerMiddleware(handleMoveDecor))
+	http.HandleFunc("/api/advance-day", ensurePlayerMiddleware(handleAdvanceDay))
 	http.HandleFunc("/api/species", handleGetSpecies)
-	http.HandleFunc("/api/buy-species", handleBuySpecies)
-	http.HandleFunc("/api/create-tank", handleCreateTank)
-	http.HandleFunc("/api/move-turtle", handleMoveTurtle)
+	http.HandleFunc("/api/buy-species", ensurePlayerMiddleware(handleBuySpecies))
+	http.HandleFunc("/api/create-tank", ensurePlayerMiddleware(handleCreateTank))
+	http.HandleFunc("/api/move-turtle", ensurePlayerMiddleware(handleMoveTurtle))
 
 	// 获取端口
 	port := os.Getenv("PORT")
@@ -58,6 +58,23 @@ func main() {
 
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatal("服务器启动失败:", err)
+	}
+}
+
+// ensurePlayerMiddleware 在任何写 API 调用前先懒初始化 default 玩家，
+// 避免冷启动 + 直接访问写接口出现 player not found。
+// 该中间件不读 body，只从 query 里取 player_id（其他在 handler 里再取）。
+func ensurePlayerMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		pid := r.URL.Query().Get("player_id")
+		if pid == "" {
+			pid = "default"
+		}
+		if _, err := getOrCreatePlayer(pid); err != nil {
+			http.Error(w, "ensure player failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		next(w, r)
 	}
 }
 

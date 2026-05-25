@@ -777,12 +777,18 @@ func handleAdvanceDay(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		PlayerID string `json:"player_id"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		http.Error(w, "invalid json", http.StatusBadRequest)
-		return
+	// 允许空 body（curl / 调试友好）；只在 body 非空时严格解码。
+	if r.Body != nil {
+		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
 	if req.PlayerID == "" {
 		req.PlayerID = "default"
+	}
+
+	// 懒初始化：所有写 API 都走这一步，避免冷启动 + 直接调用就 player not found。
+	if _, err := getOrCreatePlayer(req.PlayerID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
 	}
 
 	// 获取当前天数
@@ -811,8 +817,101 @@ func handleAdvanceDay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// M4 经济正循环：根据健康龟数发放日常龟币（健康/亲密度加成），
+	// 让玩家不会因为长时间挂机直接破产。
+	income, incomeBreakdown := computeDailyIncome(req.PlayerID)
+	if income > 0 {
+		db.Exec("UPDATE players SET coins = coins + ? WHERE id = ?", income, req.PlayerID)
+	}
+
+	// M5 季节性事件提示（不写库，只回传前端用作 toast/弹幕）。
+	seasonEvent := seasonalEvent(season, day, req.PlayerID)
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"day": day, "season": season})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"day":              day,
+		"season":           season,
+		"income":           income,
+		"income_breakdown": incomeBreakdown,
+		"season_event":     seasonEvent,
+	})
+}
+
+// computeDailyIncome 根据每只龟的健康/亲密度结算"萌宠收益"。
+// 设计目标：3-5 只健康龟 / 天 ≈ 30-80 龟币，长期可负担基础食物+维护。
+func computeDailyIncome(playerID string) (int, []map[string]interface{}) {
+	rows, err := db.Query(`SELECT id, name, vitality, appetite, mood, intimacy FROM turtles WHERE player_id = ?`, playerID)
+	if err != nil {
+		return 0, nil
+	}
+	defer rows.Close()
+
+	total := 0
+	var breakdown []map[string]interface{}
+	for rows.Next() {
+		var id, name string
+		var vit, app, mood, intim int
+		if err := rows.Scan(&id, &name, &vit, &app, &mood, &intim); err != nil {
+			continue
+		}
+		// 基础 5；健康均值 80+ 加 4；心情 70+ 加 3；亲密度每 20 加 1（封顶 5）。
+		coins := 5
+		healthAvg := (vit + app) / 2
+		if healthAvg >= 80 {
+			coins += 4
+		} else if healthAvg < 40 {
+			coins -= 2 // 病龟反而要花钱治疗（隐喻）
+		}
+		if mood >= 70 {
+			coins += 3
+		}
+		intimBonus := intim / 20
+		if intimBonus > 5 {
+			intimBonus = 5
+		}
+		coins += intimBonus
+		if coins < 0 {
+			coins = 0
+		}
+		total += coins
+		breakdown = append(breakdown, map[string]interface{}{
+			"turtle_id": id,
+			"name":      name,
+			"coins":     coins,
+		})
+	}
+	return total, breakdown
+}
+
+// seasonalEvent 给前端展示季节小事件，配合 M5 时间系统。
+// 不真改龟属性（避免和水质系统打架），但让玩家感受到节律。
+func seasonalEvent(season string, day int, playerID string) map[string]interface{} {
+	dayInSeason := day % 30
+	switch season {
+	case "spring":
+		if dayInSeason == 5 {
+			return map[string]interface{}{"type": "breeding_hint", "icon": "💕", "text": "春暖，龟们开始追逐求偶，可考虑混缸（二期）"}
+		}
+	case "summer":
+		if dayInSeason == 5 {
+			return map[string]interface{}{"type": "heat_warning", "icon": "🔥", "text": "夏季高温，注意换水频率和遮阴"}
+		}
+		if dayInSeason == 18 {
+			return map[string]interface{}{"type": "feast", "icon": "🍤", "text": "伏天龟食欲旺，多投喂可加速成长"}
+		}
+	case "autumn":
+		if dayInSeason == 5 {
+			return map[string]interface{}{"type": "fatten", "icon": "🍂", "text": "秋季囤膘期，多喂红虫/小鱼储备脂肪"}
+		}
+	case "winter":
+		if dayInSeason == 2 {
+			return map[string]interface{}{"type": "hibernate_hint", "icon": "❄️", "text": "水温下降，龟将进入半冬眠（暂未实装详细系统）"}
+		}
+		if dayInSeason == 15 {
+			return map[string]interface{}{"type": "warm_check", "icon": "🛁", "text": "寒潮中，检查加热棒和过滤器是否在线"}
+		}
+	}
+	return nil
 }
 
 func advancePlayerTanks(playerID string) error {
@@ -968,8 +1067,11 @@ func speciesCatalog() []SpeciesInfo {
 	return []SpeciesInfo{
 		{ID: "muskTurtle", Name: "麝香龟", Category: "蛋龟", Difficulty: 1, Description: "体小、皮实、爱钻洞", UnlockCost: 0, HabitatType: "deep", UnlockCondition: "初始赠送"},
 		{ID: "razorbackTurtle", Name: "剃刀龟", Category: "蛋龟", Difficulty: 2, Description: "头大壳高、性格凶", UnlockCost: 500, HabitatType: "deep", UnlockCondition: "商店购买"},
+		{ID: "loggerheadMuskTurtle", Name: "果核泥龟", Category: "蛋龟", Difficulty: 2, Description: "黄色三道纹、温顺", UnlockCost: 600, HabitatType: "deep", UnlockCondition: "商店购买"},
 		{ID: "chinesePondTurtle", Name: "中华草龟", Category: "水龟", Difficulty: 1, Description: "国民龟、墨化老头乐", UnlockCost: 0, HabitatType: "middle", UnlockCondition: "初始赠送"},
 		{ID: "yellowPondTurtle", Name: "黄喉拟水龟", Category: "水龟", Difficulty: 2, Description: "大青/小青、活泼亲人", UnlockCost: 800, HabitatType: "middle", UnlockCondition: "商店购买"},
+		{ID: "chineseStripeTurtle", Name: "中华花龟", Category: "水龟", Difficulty: 2, Description: "颈纹密布、群居热闹", UnlockCost: 1000, HabitatType: "middle", UnlockCondition: "商店购买"},
+		{ID: "redEaredSlider", Name: "巴西龟", Category: "水龟", Difficulty: 1, Description: "入侵物种警示，请勿野放", UnlockCost: 300, HabitatType: "middle", UnlockCondition: "商店购买（带科普）"},
 		{ID: "yellowMarginTurtle", Name: "黄缘闭壳龟", Category: "半水龟", Difficulty: 4, Description: "国宝级、能闭壳、贵", UnlockCost: 2000, HabitatType: "land", UnlockCondition: "成就解锁"},
 	}
 }

@@ -1031,7 +1031,15 @@ async function advanceDay() {
             const tank = getCurrentTank();
             const status = tank ? getWaterStatus(tank.water_quality || {}) : { label: '已推进' };
             const seasonNames = {spring: '春季', summer: '夏季', autumn: '秋季', winter: '冬季'};
-            showToast(`第 ${data.day} 天 · ${seasonNames[data.season] || data.season} · ${status.label}`);
+            // M4 日常龟币收入提示
+            const incomeText = data.income > 0 ? ` 💰+${data.income}` : '';
+            showToast(`第 ${data.day} 天 · ${seasonNames[data.season] || data.season} · ${status.label}${incomeText}`);
+            // M5 季节事件提示（延迟 1.4s 避免 toast 重叠）
+            if (data.season_event && data.season_event.text) {
+                setTimeout(() => {
+                    showToast(`${data.season_event.icon || '🌿'} ${data.season_event.text}`);
+                }, 1400);
+            }
         }
     } catch (e) {
         showToast('推进天数失败');
