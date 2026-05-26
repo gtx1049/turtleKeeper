@@ -18,6 +18,10 @@
                 <span class="icon">📅</span>
                 <span id="day-info">第 1 天 · 春季</span>
             </div>
+            <div class="stat-item" id="eggs-stat" title="孵化中的龟蛋" style="display:none">
+                <span class="icon">🥚</span>
+                <span id="eggs-count">0</span>
+            </div>
             <div class="stat-item">
                 <span class="icon">⏰</span>
                 <button id="advance-day-btn">下一天</button>
@@ -146,6 +150,16 @@
                     <canvas id="water-sparkline" width="360" height="100"></canvas>
                     <div id="water-legend" class="sparkline-legend"></div>
                 </div>
+                <button class="close-btn">关闭</button>
+            </div>
+        </div>
+
+        <!-- 龟蛋孵化弹窗 -->
+        <div id="eggs-modal" class="modal hidden">
+            <div class="modal-content wide">
+                <h3>🥚 孵化中的龟蛋</h3>
+                <p class="modal-tip">同缸异性亲密龟（均≥40）有几率产蛋；春季加成。蛋品质越高孵化成功率越高，夏季 +10%。</p>
+                <div id="eggs-list"></div>
                 <button class="close-btn">关闭</button>
             </div>
         </div>

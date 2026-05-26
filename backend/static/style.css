@@ -976,3 +976,15 @@ body {
 .shop-buy:hover { background: #35926a; }
 .shop-buy:disabled { background: #3a3a3a; color: #666; cursor: default; }
 .shop-buy.small { padding: 3px 8px; font-size: 11px; }
+
+/* ============ 龟蛋面板（M5 繁殖系统） ============ */
+#eggs-stat { cursor: pointer; }
+#eggs-stat:hover { transform: scale(1.05); }
+.egg-item { display: flex; align-items: center; gap: 12px; padding: 12px; background: rgba(255,210,120,0.08); border: 1px solid rgba(255,210,120,0.2); border-radius: 10px; margin-bottom: 10px; }
+.egg-icon { font-size: 32px; min-width: 40px; text-align: center; filter: drop-shadow(0 2px 4px rgba(0,0,0,0.4)); }
+.egg-info { flex: 1; }
+.egg-title { font-size: 14px; font-weight: 600; color: #f5e9c8; }
+.egg-meta { font-size: 11px; color: #b4a888; margin-top: 2px; }
+.egg-progress { font-size: 12px; color: #ffd166; margin-top: 4px; }
+.egg-progress b { font-size: 14px; color: #ffe28a; }
+.empty-state { text-align: center; padding: 24px; color: #8a8870; font-size: 13px; line-height: 1.6; }

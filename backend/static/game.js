@@ -56,6 +56,19 @@ function updateUI() {
     document.getElementById('coins').textContent = gameState.coins;
     const seasonNames = {spring: '春季', summer: '夏季', autumn: '秋季', winter: '冬季'};
     document.getElementById('day-info').textContent = `第 ${gameState.day} 天 · ${seasonNames[gameState.season] || gameState.season}`;
+
+    // M5 孵化中蛋计数徽章
+    const eggs = gameState.eggs || [];
+    const eggsStat = document.getElementById('eggs-stat');
+    const eggsCount = document.getElementById('eggs-count');
+    if (eggsStat && eggsCount) {
+        if (eggs.length > 0) {
+            eggsStat.style.display = '';
+            eggsCount.textContent = eggs.length;
+        } else {
+            eggsStat.style.display = 'none';
+        }
+    }
     
     // 更新当前选中的龟缸
     if (gameState.tanks.length > 0) {
@@ -691,6 +704,10 @@ function bindEvents() {
     document.getElementById('advance-day-btn').addEventListener('click', advanceDay);
     const manageBtn = document.getElementById('tank-manage-btn');
     if (manageBtn) manageBtn.addEventListener('click', showTankManageModal);
+
+    // 龟蛋 HUD 点击
+    const eggsStat = document.getElementById('eggs-stat');
+    if (eggsStat) eggsStat.addEventListener('click', showEggsModal);
     
     // 关闭弹窗
     document.querySelectorAll('.close-btn').forEach(btn => {
@@ -1191,10 +1208,47 @@ async function advanceDay() {
                     showToast(`${data.season_event.icon || '🌿'} ${data.season_event.text}`);
                 }, 1400);
             }
+            // M5 繁殖事件：产蛋 / 孵化，逐条推送
+            if (Array.isArray(data.breed_messages) && data.breed_messages.length > 0) {
+                data.breed_messages.forEach((msg, i) => {
+                    setTimeout(() => showToast(msg), 2800 + i * 2100);
+                });
+            }
         }
     } catch (e) {
         showToast('推进天数失败');
     }
+}
+
+async function showEggsModal() {
+    if (!gameState) return;
+    const eggs = gameState.eggs || [];
+    const list = document.getElementById('eggs-list');
+    list.innerHTML = '';
+
+    if (eggs.length === 0) {
+        list.innerHTML = '<div class="empty-state">暂无龟蛋。试试把同种异性龟放同缸，多互动提高亲密度，春季产蛋几率更高。</div>';
+    } else {
+        const speciesMap = {};
+        eggs.forEach(e => {
+            const item = document.createElement('div');
+            item.className = 'egg-item';
+            const qualityLabel = e.quality >= 70 ? '高' : e.quality >= 50 ? '中' : '低';
+            const tank = (gameState.tanks || []).find(t => t.id === e.tank_id);
+            const tankName = tank ? tank.name : '未知缸';
+            item.innerHTML = `
+                <div class="egg-icon">🥚</div>
+                <div class="egg-info">
+                    <div class="egg-title">${e.species} · ${tankName}</div>
+                    <div class="egg-meta">品质 ${qualityLabel} (${e.quality}) · 产于第 ${e.laid_day} 天</div>
+                    <div class="egg-progress">剩余 <b>${e.days_left}</b> 天孵化</div>
+                </div>
+            `;
+            list.appendChild(item);
+        });
+    }
+
+    document.getElementById('eggs-modal').classList.remove('hidden');
 }
 
 async function showCollection() {

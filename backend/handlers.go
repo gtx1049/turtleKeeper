@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	mrand "math/rand"
 	_ "modernc.org/sqlite"
 	"net/http"
 	"time"
@@ -20,6 +21,22 @@ type GameState struct {
 	Inventory       []InventoryItem `json:"inventory"`
 	UnlockedSpecies []string        `json:"unlocked_species"`
 	Achievements    []Achievement   `json:"achievements"`
+	Eggs            []Egg           `json:"eggs"`
+}
+
+// Egg 龟蛋（M5 繁殖系统）
+// 由同缸异性龟产下，孵化期满后变为新龟。
+// 反映真实生物学：龟蛋需要一定天数才能孵化，且有成功率。
+type Egg struct {
+	ID           string `json:"id"`
+	Species      string `json:"species"`
+	TankID       string `json:"tank_id"`
+	LaidDay      int    `json:"laid_day"`
+	HatchDay     int    `json:"hatch_day"`
+	ParentMomID  string `json:"parent_mom_id"`
+	ParentDadID  string `json:"parent_dad_id"`
+	Quality      int    `json:"quality"`       // 0-100，影响孵化成功率与子代初始属性
+	DaysLeft     int    `json:"days_left"`     // 距离孵化还需多少天（不持久化，现算）
 }
 
 // Turtle 乌龟
@@ -292,6 +309,20 @@ func initDB(dataDir string) error {
 		PRIMARY KEY (tank_id, day)
 	);
 	CREATE INDEX IF NOT EXISTS idx_water_history_tank ON water_history(tank_id, day);
+
+	CREATE TABLE IF NOT EXISTS eggs (
+		id TEXT PRIMARY KEY,
+		player_id TEXT,
+		species TEXT,
+		tank_id TEXT,
+		laid_day INTEGER,
+		hatch_day INTEGER,
+		parent_mom_id TEXT,
+		parent_dad_id TEXT,
+		quality INTEGER DEFAULT 60,
+		FOREIGN KEY (player_id) REFERENCES players(id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_eggs_player ON eggs(player_id);
 	`
 
 	_, err = db.Exec(schema)
@@ -341,6 +372,7 @@ func getOrCreatePlayer(playerID string) (*GameState, error) {
 	player.Inventory, _ = loadInventory(playerID)
 	player.Achievements, _ = loadAchievements(playerID)
 	player.UnlockedSpecies, _ = loadUnlockedSpecies(playerID)
+	player.Eggs, _ = loadEggs(playerID)
 
 	// 迁移补齐：新增成就在老存档里可能不存在，补上去。
 	ensureAchievementsExist(playerID, &player)
@@ -585,6 +617,32 @@ func loadUnlockedSpecies(playerID string) ([]string, error) {
 		species = append(species, s)
 	}
 	return species, nil
+}
+
+// loadEggs 加载玩家所有未孵化龟蛋
+func loadEggs(playerID string) ([]Egg, error) {
+	var day int
+	_ = db.QueryRow("SELECT day FROM players WHERE id = ?", playerID).Scan(&day)
+	rows, err := db.Query(`SELECT id, species, tank_id, laid_day, hatch_day,
+		COALESCE(parent_mom_id,''), COALESCE(parent_dad_id,''), quality
+		FROM eggs WHERE player_id = ? ORDER BY hatch_day ASC`, playerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var eggs []Egg
+	for rows.Next() {
+		var e Egg
+		rows.Scan(&e.ID, &e.Species, &e.TankID, &e.LaidDay, &e.HatchDay,
+			&e.ParentMomID, &e.ParentDadID, &e.Quality)
+		e.DaysLeft = e.HatchDay - day
+		if e.DaysLeft < 0 {
+			e.DaysLeft = 0
+		}
+		eggs = append(eggs, e)
+	}
+	return eggs, nil
 }
 
 func boolToInt(b bool) int {
@@ -1016,6 +1074,9 @@ func handleAdvanceDay(w http.ResponseWriter, r *http.Request) {
 	// M5 季节性事件提示（不写库，只回传前端用作 toast/弹幕）。
 	seasonEvent := seasonalEvent(season, day, req.PlayerID)
 
+	// M5 繁殖系统：同缸异性高亲密产蛋，到期孵化。
+	neweggs, newhatches, breedMsgs := advanceBreeding(req.PlayerID, day, season)
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
 		"day":              day,
@@ -1023,6 +1084,9 @@ func handleAdvanceDay(w http.ResponseWriter, r *http.Request) {
 		"income":           income,
 		"income_breakdown": incomeBreakdown,
 		"season_event":     seasonEvent,
+		"new_eggs":         neweggs,
+		"new_hatches":      newhatches,
+		"breed_messages":   breedMsgs,
 	})
 }
 
@@ -1079,7 +1143,7 @@ func seasonalEvent(season string, day int, playerID string) map[string]interface
 	switch season {
 	case "spring":
 		if dayInSeason == 5 {
-			return map[string]interface{}{"type": "breeding_hint", "icon": "💕", "text": "春暖，龟们开始追逐求偶，可考虑混缸（二期）"}
+			return map[string]interface{}{"type": "breeding_hint", "icon": "💕", "text": "春暖，龟们开始追逐求偶。同缸异性高亲密龟有机会产蛋。"}
 		}
 	case "summer":
 		if dayInSeason == 5 {
@@ -1278,6 +1342,180 @@ func advancePlayerTurtles(playerID string) error {
 		}
 	}
 	return nil
+}
+
+// advanceBreeding 繁殖系统（M5）：
+// 1. 检查同缸异性成熟龟（出生≥20天），亲密度均≥40，按概率产蛋
+// 2. 推进已有蛋的孵化倒计时，到期则孵化为新龟并删除蛋记录
+// 3. 季节加成：春季产蛋概率 ×1.5
+// 返回 (newEggsLaid, newTurtlesHatched, messages)
+func advanceBreeding(playerID string, day int, season string) (int, int, []string) {
+	var msgs []string
+	newEggs := 0
+	newHatches := 0
+
+	// ── 1. 产蛋检测 ──
+	rows, err := db.Query(`SELECT id, species, name, tank_id, gender, birth_day, intimacy, mood
+		FROM turtles WHERE player_id = ?`, playerID)
+	if err != nil {
+		return 0, 0, nil
+	}
+	type turtleInfo struct {
+		ID, Species, Name, TankID, Gender string
+		BirthDay, Intimacy, Mood          int
+	}
+	var all []turtleInfo
+	for rows.Next() {
+		var t turtleInfo
+		rows.Scan(&t.ID, &t.Species, &t.Name, &t.TankID, &t.Gender, &t.BirthDay, &t.Intimacy, &t.Mood)
+		all = append(all, t)
+	}
+	rows.Close()
+
+	tankTurtles := map[string][]turtleInfo{}
+	for _, t := range all {
+		if t.BirthDay <= day-20 { // 成年龟
+			tankTurtles[t.TankID] = append(tankTurtles[t.TankID], t)
+		}
+	}
+
+	for tankID, ts := range tankTurtles {
+		var males, females []turtleInfo
+		for _, t := range ts {
+			if t.Gender == "♂" {
+				males = append(males, t)
+			} else if t.Gender == "♀" {
+				females = append(females, t)
+			}
+		}
+		if len(males) == 0 || len(females) == 0 {
+			continue
+		}
+
+		var mom, dad turtleInfo
+		found := false
+		for _, f := range females {
+			for _, m := range males {
+				if f.Intimacy >= 40 && m.Intimacy >= 40 {
+					mom, dad = f, m
+					found = true
+					break
+				}
+			}
+			if found {
+				break
+			}
+		}
+		if !found {
+			continue
+		}
+
+		// 产蛋概率：基础 12%，亲密度加成，春季 ×1.5
+		prob := 0.12
+		avgIntimacy := (mom.Intimacy + dad.Intimacy) / 2
+		prob += float64(avgIntimacy-40) * 0.003
+		if season == "spring" {
+			prob *= 1.5
+		}
+		avgMood := (mom.Mood + dad.Mood) / 2
+		prob += float64(avgMood) * 0.0005
+
+		if mrand.Float64() > prob {
+			continue
+		}
+
+		// 子代种类 = 母方种类（简化遗传）
+		eggID := fmt.Sprintf("egg_%d_%d", time.Now().UnixNano(), mrand.Intn(1000))
+		hatchAfter := 5 + mrand.Intn(4) // 5-8 天
+		hatchDay := day + hatchAfter
+		quality := 40 + mrand.Intn(41) // 40-80
+		db.Exec(`INSERT INTO eggs (id, player_id, species, tank_id, laid_day, hatch_day,
+			parent_mom_id, parent_dad_id, quality)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			eggID, playerID, mom.Species, tankID, day, hatchDay, mom.ID, dad.ID, quality)
+
+		sp, _ := findSpecies(mom.Species)
+		spName := mom.Species
+		if sp.ID != "" {
+			spName = sp.Name
+		}
+		msgs = append(msgs, fmt.Sprintf("🥚 %s 和 %s 产下了一枚%s蛋！预计 %d 天后孵化。",
+			mom.Name, dad.Name, spName, hatchAfter))
+		newEggs++
+	}
+
+	// ── 2. 孵化检测 ──
+	eggRows, err := db.Query(`SELECT id, species, tank_id, laid_day, hatch_day,
+		COALESCE(parent_mom_id,''), COALESCE(parent_dad_id,''), quality
+		FROM eggs WHERE player_id = ? AND hatch_day <= ?`, playerID, day)
+	if err != nil {
+		return newEggs, newHatches, msgs
+	}
+	type eggInfo struct {
+		ID, Species, TankID, MomID, DadID string
+		LaidDay, HatchDay, Quality        int
+	}
+	var ready []eggInfo
+	for eggRows.Next() {
+		var e eggInfo
+		eggRows.Scan(&e.ID, &e.Species, &e.TankID, &e.LaidDay, &e.HatchDay,
+			&e.MomID, &e.DadID, &e.Quality)
+		ready = append(ready, e)
+	}
+	eggRows.Close()
+
+	for _, e := range ready {
+		hatchProb := float64(e.Quality) / 100.0
+		if season == "summer" {
+			hatchProb += 0.1
+		}
+		if hatchProb > 0.95 {
+			hatchProb = 0.95
+		}
+
+		db.Exec("DELETE FROM eggs WHERE id = ?", e.ID)
+
+		if mrand.Float64() > hatchProb {
+			msgs = append(msgs, "💔 一枚蛋没有孵化成功…")
+			continue
+		}
+
+		tID := fmt.Sprintf("turtle_%d_%d", time.Now().UnixNano(), mrand.Intn(1000))
+		sp, _ := findSpecies(e.Species)
+		name := "小宝宝"
+		if sp.ID != "" {
+			name = defaultTurtleName(sp.ID)
+		}
+		gender := "♂"
+		if mrand.Float64() < 0.5 {
+			gender = "♀"
+		}
+		personalities := []string{"胆小", "活泼", "凶猛", "慵懒", "吃货"}
+		personality := personalities[mrand.Intn(len(personalities))]
+
+		initVitality := clampInt(e.Quality, 40, 100)
+		initAppetite := clampInt(e.Quality+5, 40, 100)
+		initSkin := clampInt(e.Quality-5, 40, 100)
+		initShell := clampInt(e.Quality, 40, 100)
+
+		db.Exec(`INSERT INTO turtles (id, player_id, species, name, gender, birth_day, weight,
+			personality, vitality, appetite, skin, shell, intimacy, melanism, tank_id,
+			hunger, cleanliness, mood)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+			tID, playerID, e.Species, name, gender, day, 5.0+float64(mrand.Intn(5)),
+			personality, initVitality, initAppetite, initSkin, initShell,
+			10, 0, e.TankID, 70, 90, 80)
+
+		spName := e.Species
+		if sp.ID != "" {
+			spName = sp.Name
+		}
+		msgs = append(msgs, fmt.Sprintf("🐣 一只%s破壳而出！是%s的%s，性格%s。",
+			spName, gender, name, personality))
+		newHatches++
+	}
+
+	return newEggs, newHatches, msgs
 }
 
 func clampFloat(v, minV, maxV float64) float64 {

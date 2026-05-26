@@ -346,3 +346,86 @@ func TestFoodEffect(t *testing.T) {
 		t.Errorf("default food should have positive hunger, got %d", h)
 	}
 }
+
+// TestAdvanceBreeding 验证：
+// 1. 同缸异性高亲密度龟在足够多次推进后能产蛋（统计意义上）
+// 2. 缺乏异性 / 亲密度不够时不产蛋
+// 3. 到期蛋会被处理并删除
+func TestAdvanceBreeding(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "tkeeper_breed_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+	if err := initDB(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec("INSERT INTO players (id, coins, day, season) VALUES (?, 500, 50, 'spring')", "p1"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.Exec("INSERT INTO tanks (id, player_id, water_level) VALUES (?, ?, ?)", "tk1", "p1", "deep"); err != nil {
+		t.Fatal(err)
+	}
+	insert := func(id, gender string, intim int) {
+		_, err := db.Exec(`INSERT INTO turtles (id, player_id, species, name, gender, birth_day,
+			vitality, appetite, skin, shell, intimacy, mood, tank_id, hunger, cleanliness)
+			VALUES (?, ?, 'muskTurtle', ?, ?, 0, 100, 100, 100, 100, ?, 90, 'tk1', 80, 90)`,
+			id, "p1", id, gender, intim)
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	insert("m1", "♂", 90)
+	insert("f1", "♀", 90)
+
+	// 跑 30 次推进，spring 高亲密度下应至少产 1 枚蛋（概率上几乎必然）
+	produced := 0
+	for i := 0; i < 30; i++ {
+		eggs, _, _ := advanceBreeding("p1", 50+i, "spring")
+		produced += eggs
+	}
+	if produced == 0 {
+		t.Errorf("expected at least one egg from 30 rounds of high-intimacy spring breeding, got 0")
+	}
+
+	// 单独缸 + 单独单性别龟，应该不产蛋
+	if _, err := db.Exec("INSERT INTO tanks (id, player_id, water_level) VALUES (?, ?, ?)", "tk2", "p1", "deep"); err != nil {
+		t.Fatal(err)
+	}
+	insert2 := func(id string) {
+		db.Exec(`INSERT INTO turtles (id, player_id, species, name, gender, birth_day,
+			vitality, appetite, skin, shell, intimacy, mood, tank_id, hunger, cleanliness)
+			VALUES (?, 'p2', 'muskTurtle', ?, '♂', 0, 100, 100, 100, 100, 90, 90, 'tk2', 80, 90)`,
+			id, id)
+	}
+	if _, err := db.Exec("INSERT INTO players (id, coins, day, season) VALUES (?, 500, 50, 'spring')", "p2"); err != nil {
+		t.Fatal(err)
+	}
+	insert2("solo")
+	for i := 0; i < 20; i++ {
+		eggs, _, _ := advanceBreeding("p2", 50+i, "spring")
+		if eggs != 0 {
+			t.Errorf("solo male should not produce eggs, got %d on round %d", eggs, i)
+		}
+	}
+
+	// 到期蛋强制孵化测试：插入一枚 hatch_day = current 的蛋
+	db.Exec(`INSERT INTO eggs (id, player_id, species, tank_id, laid_day, hatch_day, quality)
+		VALUES ('egg_test', 'p1', 'muskTurtle', 'tk1', 70, 90, 95)`)
+	beforeTurtles := 0
+	db.QueryRow("SELECT COUNT(*) FROM turtles WHERE player_id='p1'").Scan(&beforeTurtles)
+	advanceBreeding("p1", 90, "summer")
+	var leftEggs int
+	db.QueryRow("SELECT COUNT(*) FROM eggs WHERE id='egg_test'").Scan(&leftEggs)
+	if leftEggs != 0 {
+		t.Errorf("egg should be removed after hatch_day reached, still found %d", leftEggs)
+	}
+	afterTurtles := 0
+	db.QueryRow("SELECT COUNT(*) FROM turtles WHERE player_id='p1'").Scan(&afterTurtles)
+	// quality=95 + summer +0.1 => hatchProb=0.95，几乎必然孵化
+	if afterTurtles <= beforeTurtles {
+		t.Errorf("expected new turtle hatched from quality-95 egg, before=%d after=%d", beforeTurtles, afterTurtles)
+	}
+}
