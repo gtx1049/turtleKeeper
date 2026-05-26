@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"math"
 	mrand "math/rand"
 	_ "modernc.org/sqlite"
 	"net/http"
@@ -728,6 +729,9 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 		FoodID   string `json:"food_id"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
+	if req.PlayerID == "" {
+		req.PlayerID = "default"
+	}
 
 	// 验证背包里还有该食物，避免刷接口刷负数
 	var haveCount int
@@ -854,15 +858,15 @@ func maintainTank(playerID, tankID, mode string) (map[string]interface{}, error)
 	case "scoop_waste":
 		// 普通清理：免费但效果有限，适合日常点一下。
 		clarity = clampInt(clarity+18, 0, 100)
-		ammonia = clampFloat(ammonia*0.78, 0, 5)
-		nitrite = clampFloat(nitrite*0.86, 0, 5)
+		ammonia = roundFloat(clampFloat(ammonia*0.78, 0, 5), 2)
+		nitrite = roundFloat(clampFloat(nitrite*0.86, 0, 5), 2)
 		message = "已捞走残饵和粪便，清澈度小幅回升"
 	case "partial_change":
 		// 部分换水：低成本，把水质拉回安全区但不清零。
 		cost = 20
 		clarity = clampInt(clarity+35, 0, 100)
-		ammonia = clampFloat(ammonia*0.42, 0, 5)
-		nitrite = clampFloat(nitrite*0.50, 0, 5)
+		ammonia = roundFloat(clampFloat(ammonia*0.42, 0, 5), 2)
+		nitrite = roundFloat(clampFloat(nitrite*0.50, 0, 5), 2)
 		message = "完成 1/3 换水，水质明显好转"
 	case "deep_clean":
 		// 深度清洁：保留旧 /api/clean 的一键重置语义，但加入经营成本。
@@ -878,8 +882,8 @@ func maintainTank(playerID, tankID, mode string) (map[string]interface{}, error)
 		cost = 180
 		hasFilter = 1
 		clarity = clampInt(clarity+25, 0, 100)
-		ammonia = clampFloat(ammonia*0.70, 0, 5)
-		nitrite = clampFloat(nitrite*0.78, 0, 5)
+		ammonia = roundFloat(clampFloat(ammonia*0.70, 0, 5), 2)
+		nitrite = roundFloat(clampFloat(nitrite*0.78, 0, 5), 2)
 		message = "过滤器安装完成，之后水质恶化会变慢"
 	default:
 		return nil, fmt.Errorf("unknown maintenance mode")
@@ -935,6 +939,9 @@ func handleInteract(w http.ResponseWriter, r *http.Request) {
 		Action   string `json:"action"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
+	if req.PlayerID == "" {
+		req.PlayerID = "default"
+	}
 
 	switch req.Action {
 	case "pet":
@@ -942,7 +949,36 @@ func handleInteract(w http.ResponseWriter, r *http.Request) {
 	case "play":
 		db.Exec("UPDATE turtles SET mood = MIN(100, mood + 8), hunger = MAX(0, hunger - 5) WHERE id = ?", req.TurtleID)
 	case "check":
-		// 检查健康状态，返回详细信息
+		// 检查健康状态，返回详细建议
+		var t Turtle
+		if err := db.QueryRow(`SELECT id, species, name, gender, birth_day, weight, personality,
+			hunger, cleanliness, mood, intimacy, vitality, appetite, skin, shell, tank_id
+			FROM turtles WHERE id = ? AND player_id = ?`, req.TurtleID, req.PlayerID).
+			Scan(&t.ID, &t.Species, &t.Name, &t.Gender, &t.BirthDay, &t.Weight, &t.Personality,
+				&t.Hunger, &t.Cleanliness, &t.Mood, &t.Intimacy, &t.Health.Vitality, &t.Health.Appetite, &t.Health.Skin, &t.Health.Shell, &t.TankID); err != nil {
+			http.Error(w, "turtle not found", http.StatusNotFound)
+			return
+		}
+		sp, _ := findSpecies(t.Species)
+		var tankData map[string]interface{}
+		if t.TankID != "" {
+			var ph, ammonia, nitrite float64
+			var clarity int
+			var hasFilter, hasUVB bool
+			if err := db.QueryRow(`SELECT ph, ammonia, nitrite, clarity, has_filter, has_uvb, water_level FROM tanks WHERE id = ?`, t.TankID).
+				Scan(&ph, &ammonia, &nitrite, &clarity, &hasFilter, &hasUVB, &tankData); err == nil {
+				tankData = map[string]interface{}{
+					"ph": ph, "ammonia": ammonia, "nitrite": nitrite, "clarity": clarity,
+					"has_filter": hasFilter, "has_uvb": hasUVB, "water_level": tankData,
+				}
+			}
+		}
+		suggestions := buildTurtleSuggestions(t, sp, tankData)
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"status": "ok", "turtle": t, "suggestions": suggestions,
+		})
+		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1267,8 +1303,8 @@ func advancePlayerTanks(playerID string) error {
 			filterFactor = clampFloat(filterFactor-decorFilter, 0.20, 1.0)
 		}
 		plantBonus := float64(minInt(3, plantCount)) * 0.08
-		ammonia := clampFloat(tank.Ammonia+(0.12*bioLoad*filterFactor)-plantBonus, 0, 5)
-		nitrite := clampFloat(tank.Nitrite+(0.06*bioLoad*filterFactor)-plantBonus*0.5, 0, 5)
+		ammonia := roundFloat(clampFloat(tank.Ammonia+(0.12*bioLoad*filterFactor)-plantBonus, 0, 5), 2)
+		nitrite := roundFloat(clampFloat(tank.Nitrite+(0.06*bioLoad*filterFactor)-plantBonus*0.5, 0, 5), 2)
 		clarity := clampInt(tank.Clarity-clarityDrop-turtleCount+plantCount+decorClarity, 0, 100)
 
 		if _, err := db.Exec("UPDATE tanks SET ammonia = ?, nitrite = ?, clarity = ? WHERE id = ?", ammonia, nitrite, clarity, tank.ID); err != nil {
@@ -1315,12 +1351,13 @@ func advancePlayerTurtles(playerID string) error {
 		ID      string
 		TankID  string
 		Species string
+		Hunger  int
 		Ammonia float64
 		Nitrite float64
 		Clarity int
 	}
 
-	rows, err := db.Query(`SELECT t.id, t.tank_id, t.species, COALESCE(tk.ammonia, 0), COALESCE(tk.nitrite, 0), COALESCE(tk.clarity, 100)
+	rows, err := db.Query(`SELECT t.id, t.tank_id, t.species, t.hunger, COALESCE(tk.ammonia, 0), COALESCE(tk.nitrite, 0), COALESCE(tk.clarity, 100)
 		FROM turtles t LEFT JOIN tanks tk ON t.tank_id = tk.id
 		WHERE t.player_id = ?`, playerID)
 	if err != nil {
@@ -1330,7 +1367,7 @@ func advancePlayerTurtles(playerID string) error {
 	var turtles []turtleDecay
 	for rows.Next() {
 		var t turtleDecay
-		if err := rows.Scan(&t.ID, &t.TankID, &t.Species, &t.Ammonia, &t.Nitrite, &t.Clarity); err != nil {
+		if err := rows.Scan(&t.ID, &t.TankID, &t.Species, &t.Hunger, &t.Ammonia, &t.Nitrite, &t.Clarity); err != nil {
 			rows.Close()
 			return err
 		}
@@ -1370,6 +1407,12 @@ func advancePlayerTurtles(playerID string) error {
 			healthDrop = 2
 		}
 
+		// 饥饿衰减：连续饥饿（hunger 已为 0）每 2 天额外损耗活力/食欲
+		starveDrop := 0
+		if turtle.Hunger <= 0 {
+			starveDrop = 1
+		}
+
 		// M3 布景效果：适合中/陕水位龟种的晒台反馈
 		summary := tankSummary[turtle.TankID]
 		sp, hasSp := findSpecies(turtle.Species)
@@ -1385,9 +1428,9 @@ func advancePlayerTurtles(playerID string) error {
 			hunger = MAX(0, hunger - 10),
 			cleanliness = MAX(0, cleanliness - ?),
 			mood = MAX(0, mood - ?),
-			vitality = MAX(0, vitality - ?),
-			appetite = MAX(0, appetite - ?)
-			WHERE id = ? AND player_id = ?`, cleanDrop, moodDrop, healthDrop, healthDrop, turtle.ID, playerID)
+			vitality = MAX(0, vitality - ? - ?),
+			appetite = MAX(0, appetite - ? - ?)
+			WHERE id = ? AND player_id = ?`, cleanDrop, moodDrop, healthDrop, starveDrop, healthDrop, starveDrop, turtle.ID, playerID)
 		if err != nil {
 			return err
 		}
@@ -1570,6 +1613,11 @@ func advanceBreeding(playerID string, day int, season string) (int, int, []strin
 	}
 
 	return newEggs, newHatches, msgs
+}
+
+func roundFloat(v float64, prec int) float64 {
+	p := math.Pow(10, float64(prec))
+	return math.Round(v*p) / p
 }
 
 func clampFloat(v, minV, maxV float64) float64 {
@@ -2231,9 +2279,13 @@ func buildTurtleSuggestions(t Turtle, sp SpeciesInfo, tank map[string]interface{
 	}
 	if t.Cleanliness <= 40 {
 		out = append(out, map[string]interface{}{"level": "warn", "icon": "🛁", "text": "身上脏了，建议清洁或换水"})
+	} else if t.Cleanliness <= 60 {
+		out = append(out, map[string]interface{}{"level": "info", "icon": "🧼", "text": "清洁度一般，可顺手清理一下"})
 	}
 	if t.Mood <= 40 {
-		out = append(out, map[string]interface{}{"level": "info", "icon": "👋", "text": "心情低落，多互动可提升亲密度"})
+		out = append(out, map[string]interface{}{"level": "warn", "icon": "👋", "text": "心情低落，多互动可提升亲密度"})
+	} else if t.Mood <= 55 {
+		out = append(out, map[string]interface{}{"level": "info", "icon": "🎈", "text": "心情一般，陪它玩玩吧"})
 	}
 	if t.Health.Vitality <= 50 || t.Health.Appetite <= 50 {
 		out = append(out, map[string]interface{}{"level": "warn", "icon": "🩺", "text": "活力/食欲偏低，注意水质和环境温度"})

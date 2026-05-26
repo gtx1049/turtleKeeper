@@ -222,4 +222,43 @@ type Tank struct {
 > 每 5 小时由养龟专家子agent自动游玩、找bug、提改进建议。最新在最上。
 
 <!-- AI_TESTER_LOG_START -->
+
+### 🐢 测试轮次 2026-05-27 01:46
+- **环境快照**：day=9, season=spring, coins=607, 龟数=2（小麝香、小草）
+- **游玩动作**：
+  1. `GET /api/state` → 正常返回，default 玩家有 2 龟 2 缸，inventory 有 food_1×20 等
+  2. `POST /api/feed`（body 无 player_id）→ ❌ "该食物已用完，请到商店补货"（inventory 明明有 20 个）
+  3. `POST /api/feed`（body 带 player_id="default"）→ ✅ 正常，hunger+30, intimacy+2, mood+1
+  4. `POST /api/interact`（pet）→ ✅ status=ok
+  5. `POST /api/maintain-tank`（tank_1, partial_change）→ ✅ cost=20, 水质重置
+  6. `POST /api/advance-day` → ✅ day=2, income=24, season=spring, 无繁殖事件
+  7. `POST /api/buy-item`（food_1×1）→ ✅ cost=12, gained=10, coins=492
+  8. `POST /api/maintain-tank`（tank_2, scoop_waste）→ ✅ cost=0, clarity=100
+  9. `POST /api/maintain-tank`（tank_2, partial_change）→ ✅ cost=20, 水质好转
+  10. `POST /api/advance-day` ×7 → day=3~9, income 从 24→21→18（因 mood/cleanliness 下降）
+  11. `GET /api/turtle?id=turtle_1` → ✅ 返回详情+suggestions，但 suggestions 仅一条（hunger=0）
+  12. `POST /api/feed`（turtle_1 hunger=0）→ ✅ 允许喂食，hunger+30（未溢出）
+  13. `POST /api/maintain-tank`（tank_2, install_filter）→ ✅ cost=180, has_filter=true
+- **发现的 Bug**（按严重度 P0/P1/P2）：
+  - [P1] `/api/feed` player_id 必须从 JSON body 传入，否则查询空字符串玩家导致食物"永远用完"。复现：`curl -d '{"turtle_id":"turtle_1","food_id":"food_1"}' /api/feed` → "该食物已用完"。期望：body 无 player_id 时默认 "default"（与 maintain-tank/interact/advance-day 等保持一致）。
+  - [P2] `buildTurtleSuggestions` mood 阈值 `<=40` 过严。turtle_1 mood=49 时无心情提示，但已明显低于健康线。建议调到 `<=50` 或 `<=45`。
+  - [P2] 饥饿为 0 长期不影响 health 四维。advancePlayerTurtles 中 hunger 只影响 income（间接 via mood），但 vitality/appetite/skin/shell 不因饥饿下降。真实养龟逻辑：连续饥饿应缓慢损耗活力/食欲。
+  - [P3] `handleInteract` 的 `case "check"` 为空实现，前端若调用 check 无任何数据返回，造成困惑。建议补实现或移除该 case。
+  - [P3] 浮点数精度溢出：`ammonia=0.6155183999999999` 等，建议 round 到 2 位小数后再入库/返回。
+- **手感问题**（不是 bug，但影响体验）：
+  - tank_2（草龟的家）默认无过滤器，第 9 天氨 0.88、清澈度 65，水质恶化速度快于新手学习曲线。建议初始赠送一个过滤器或开局引导安装。
+  - income 7 天内从 24 降到 18，降幅 25%，对新手期略有挫败感。尤其是 feed API 有 bug 时，玩家更难及时发现需要喂食。
+  - suggestions 仅提示 hunger，cleanliness=54 和 mood=49 均未触发。阈值整体偏保守，容易让玩家错过最佳干预窗口。
+- **改进建议**（按性价比排序）：
+  - 🔥 高性价比：在 `handleFeed` 顶部加 `if req.PlayerID == "" { req.PlayerID = "default" }`（与其他 handler 一致，1 行代码修复核心功能）。
+  - 🔥 高性价比：饥饿为 0 时增加 health 衰减逻辑，如连续 hunger≤0 的天数每 2 天 vitality/appetite -1，让"饿"有真实后果。
+  - 一般：水质数值 round(float, 2) 后入库，避免 `0.6155183999999999` 这种脏数据。
+  - 一般：调整 suggestions 阈值 mood≤50、cleanliness≤60，提升预警敏感度。
+  - 一般：tank_2 默认 has_filter=true，或开局弹窗引导安装过滤器。
+- **下轮重点关注**：
+  - feed API 修复后验证前端喂食链路
+  - 繁殖系统：推进到 day≥20 看同缸异性高亲密龟是否产蛋
+  - 长期挂机测试：推进 30+ 天看龟是否会饿死/水质崩溃
+
+---
 <!-- AI_TESTER_LOG_END -->

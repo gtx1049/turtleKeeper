@@ -825,6 +825,8 @@ async function showDecorModal() {
         showToast('没有可布置的龟缸');
         return;
     }
+    await showDecorMenu();
+}
 
 async function showDecorMenu() {
     const modal = document.getElementById('decor-modal');
