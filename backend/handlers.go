@@ -342,7 +342,36 @@ func getOrCreatePlayer(playerID string) (*GameState, error) {
 	player.Achievements, _ = loadAchievements(playerID)
 	player.UnlockedSpecies, _ = loadUnlockedSpecies(playerID)
 
+	// 迁移补齐：新增成就在老存档里可能不存在，补上去。
+	ensureAchievementsExist(playerID, &player)
+
 	return &player, nil
+}
+
+// ensureAchievementsExist 在老存档里补上后加的成就记录，以免玩家看不到。
+func ensureAchievementsExist(playerID string, player *GameState) {
+	defaults := []Achievement{
+		{ID: "ach_1", Name: "初来乍到", Description: "获得第一只乌龟"},
+		{ID: "ach_2", Name: "喂食新手", Description: "第一次喂食"},
+		{ID: "ach_3", Name: "换水达人", Description: "第一次换水"},
+		{ID: "ach_4", Name: "布景师", Description: "第一次布置造景"},
+		{ID: "ach_5", Name: "破产边缘", Description: "第一次在商店购物"},
+	}
+	existing := map[string]bool{}
+	for _, a := range player.Achievements {
+		existing[a.ID] = true
+	}
+	changed := false
+	for _, a := range defaults {
+		if !existing[a.ID] {
+			db.Exec("INSERT OR IGNORE INTO achievements (id, player_id, name, description) VALUES (?, ?, ?, ?)",
+				a.ID, playerID, a.Name, a.Description)
+			changed = true
+		}
+	}
+	if changed {
+		player.Achievements, _ = loadAchievements(playerID)
+	}
 }
 
 // 初始化默认乌龟
@@ -423,6 +452,7 @@ func initAchievements(playerID string) {
 		{ID: "ach_2", Name: "喂食新手", Description: "第一次喂食"},
 		{ID: "ach_3", Name: "换水达人", Description: "第一次换水"},
 		{ID: "ach_4", Name: "布景师", Description: "第一次布置造景"},
+		{ID: "ach_5", Name: "破产边缘", Description: "第一次在商店购物"},
 	}
 
 	for _, a := range achievements {
@@ -1275,6 +1305,129 @@ func handleGetSpecies(w http.ResponseWriter, r *http.Request) {
 func handleGetDecorCatalog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(decorCatalog())
+}
+
+// ShopItemSpec 是商店里能买到的消耗品/工具。
+// 食物缺货是当前最痛的循环 gap：饥饿值会涨但买不到食物。这里补上。
+type ShopItemSpec struct {
+	ID       string `json:"id"`       // 同时也是 inventory 表里的 id
+	Type     string `json:"type"`     // food / tool
+	Name     string `json:"name"`
+	Icon     string `json:"icon"`
+	Desc     string `json:"desc"`
+	Cost     int    `json:"cost"`     // 单次购买价格（每次买 PackSize 个）
+	PackSize int    `json:"pack_size"`// 每次购买进背包多少个
+}
+
+// shopCatalog 全部走代码定义，跟 initInventory 的 id 复用，方便堆叠。
+func shopCatalog() []ShopItemSpec {
+	return []ShopItemSpec{
+		{ID: "food_1", Type: "food", Name: "龟粮", Icon: "🍖", Desc: "日常主粮，浮性颗粒。", Cost: 12, PackSize: 10},
+		{ID: "food_2", Type: "food", Name: "红虫", Icon: "🪱", Desc: "高蛋白零食，亲密度 +3。", Cost: 20, PackSize: 5},
+		{ID: "food_3", Type: "food", Name: "虾干", Icon: "🦐", Desc: "硬质零食，磨喙也磨爪。", Cost: 30, PackSize: 5},
+		{ID: "food_4", Type: "food", Name: "小鱼苗", Icon: "🐟", Desc: "野性十足，半水龟最爱。", Cost: 45, PackSize: 4},
+		{ID: "tool_1", Type: "tool", Name: "水质测试剂", Icon: "🧪", Desc: "立刻刷新水质显示。", Cost: 25, PackSize: 3},
+		{ID: "tool_2", Type: "tool", Name: "维生素片", Icon: "💊", Desc: "活力 +20（喂食时随机生效）。", Cost: 35, PackSize: 2},
+	}
+}
+
+func findShopItem(id string) (ShopItemSpec, bool) {
+	for _, s := range shopCatalog() {
+		if s.ID == id {
+			return s, true
+		}
+	}
+	return ShopItemSpec{}, false
+}
+
+// handleGetShopCatalog 返回商店白名单 + 该玩家当前龟币，方便前端一次取齐。
+func handleGetShopCatalog(w http.ResponseWriter, r *http.Request) {
+	pid := r.URL.Query().Get("player_id")
+	if pid == "" {
+		pid = "default"
+	}
+	var coins int
+	db.QueryRow("SELECT coins FROM players WHERE id = ?", pid).Scan(&coins)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"items": shopCatalog(),
+		"coins": coins,
+	})
+}
+
+// handleBuyItem 用龟币买消耗品。已存在则 count += pack_size，否则插入新行。
+// 一次只买一包；前端循环调用更直观。
+func handleBuyItem(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		PlayerID string `json:"player_id"`
+		ItemID   string `json:"item_id"`
+		Quantity int    `json:"quantity"` // 买几包，默认 1
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, "invalid json", http.StatusBadRequest)
+		return
+	}
+	if req.PlayerID == "" {
+		req.PlayerID = "default"
+	}
+	if req.Quantity <= 0 {
+		req.Quantity = 1
+	}
+	if req.Quantity > 20 {
+		req.Quantity = 20
+	}
+	spec, ok := findShopItem(req.ItemID)
+	if !ok {
+		http.Error(w, "unknown item: "+req.ItemID, http.StatusBadRequest)
+		return
+	}
+	totalCost := spec.Cost * req.Quantity
+	totalGain := spec.PackSize * req.Quantity
+
+	var coins int
+	if err := db.QueryRow("SELECT coins FROM players WHERE id = ?", req.PlayerID).Scan(&coins); err != nil {
+		http.Error(w, "player not found", http.StatusBadRequest)
+		return
+	}
+	if coins < totalCost {
+		http.Error(w, fmt.Sprintf("龟币不足，需要 %d，当前 %d", totalCost, coins), http.StatusBadRequest)
+		return
+	}
+
+	// 扣钱
+	if _, err := db.Exec("UPDATE players SET coins = coins - ? WHERE id = ?", totalCost, req.PlayerID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 入库：先查有没有同 id，有就 +count，没有就 insert
+	var existing int
+	err := db.QueryRow("SELECT count FROM inventory WHERE id = ? AND player_id = ?", spec.ID, req.PlayerID).Scan(&existing)
+	if err == sql.ErrNoRows {
+		db.Exec("INSERT INTO inventory (id, player_id, item_type, name, count, icon) VALUES (?, ?, ?, ?, ?, ?)",
+			spec.ID, req.PlayerID, spec.Type, spec.Name, totalGain, spec.Icon)
+	} else if err == nil {
+		db.Exec("UPDATE inventory SET count = count + ? WHERE id = ? AND player_id = ?", totalGain, spec.ID, req.PlayerID)
+	} else {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 成就：破产边缘（首次商店购物）
+	db.Exec(`UPDATE achievements SET unlocked = 1, unlock_day = (SELECT day FROM players WHERE id = ?)
+		WHERE player_id = ? AND id = 'ach_5' AND unlocked = 0`, req.PlayerID, req.PlayerID)
+
+	var coinsAfter int
+	db.QueryRow("SELECT coins FROM players WHERE id = ?", req.PlayerID).Scan(&coinsAfter)
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":    "ok",
+		"item_id":   spec.ID,
+		"gained":    totalGain,
+		"cost":      totalCost,
+		"coins":     coinsAfter,
+	})
 }
 
 func handleBuySpecies(w http.ResponseWriter, r *http.Request) {

@@ -714,7 +714,8 @@ function bindEvents() {
 }
 
 function handleAction(action) {
-    if (!currentTurtleId) {
+    // 商店不依赖龟龟，其他动作需要先选中一只
+    if (action !== 'shop' && action !== 'collection' && !currentTurtleId) {
         showToast('请先选择一只乌龟');
         return;
     }
@@ -734,6 +735,9 @@ function handleAction(action) {
             break;
         case 'interact':
             interactWithTurtle();
+            break;
+        case 'shop':
+            showShopModal();
             break;
     }
 }
@@ -1416,3 +1420,80 @@ function escapeHtml(s) {
 }
 
 const PLAYER_ID = 'default';
+
+// ============ 商店 ============
+async function showShopModal() {
+    const modal = document.getElementById('shop-modal');
+    const list = document.getElementById('shop-list');
+    const coinsEl = document.getElementById('shop-coins');
+    list.innerHTML = '<p style="text-align:center;color:#aaa;">加载中...</p>';
+    coinsEl.textContent = '';
+    modal.classList.remove('hidden');
+
+    try {
+        const res = await fetch('/api/shop-catalog?player_id=default');
+        if (!res.ok) throw new Error(await res.text());
+        const data = await res.json();
+        renderShopList(data.items || [], data.coins || 0);
+    } catch (e) {
+        list.innerHTML = `<p style="text-align:center;color:#f88;">加载商店失败：${escapeHtml(e.message)}</p>`;
+    }
+}
+
+function renderShopList(items, coins) {
+    const list = document.getElementById('shop-list');
+    const coinsEl = document.getElementById('shop-coins');
+    coinsEl.innerHTML = `💰 当前龟币：<strong>${coins}</strong>`;
+    list.innerHTML = '';
+
+    items.forEach(item => {
+        const owned = (gameState.inventory || []).find(i => i.id === item.id);
+        const ownedCount = owned ? owned.count : 0;
+        const canAfford = coins >= item.cost;
+        const row = document.createElement('div');
+        row.className = 'shop-item' + (canAfford ? '' : ' disabled');
+        row.innerHTML = `
+            <div class="shop-icon">${item.icon || '📦'}</div>
+            <div class="shop-info">
+                <div class="shop-name">${escapeHtml(item.name)} <span class="shop-pack">×${item.pack_size}</span></div>
+                <div class="shop-desc">${escapeHtml(item.desc || '')}</div>
+                <div class="shop-owned">背包现有：${ownedCount}</div>
+            </div>
+            <div class="shop-actions">
+                <div class="shop-cost">💰 ${item.cost}</div>
+                <button class="shop-buy" data-id="${item.id}" data-qty="1" ${canAfford?'':'disabled'}>买 1</button>
+                <button class="shop-buy small" data-id="${item.id}" data-qty="5" ${coins>=item.cost*5?'':'disabled'}>×5</button>
+            </div>
+        `;
+        list.appendChild(row);
+    });
+
+    list.querySelectorAll('.shop-buy').forEach(btn => {
+        btn.addEventListener('click', () => buyShopItem(btn.dataset.id, parseInt(btn.dataset.qty, 10) || 1));
+    });
+}
+
+async function buyShopItem(itemId, quantity) {
+    try {
+        const res = await fetch('/api/buy-item?player_id=default', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ player_id: 'default', item_id: itemId, quantity })
+        });
+        if (!res.ok) {
+            const txt = await res.text();
+            showToast(txt || '购买失败');
+            return;
+        }
+        const data = await res.json();
+        showToast(`买到了 ${data.gained} 件货，耗 ${data.cost} 龟币`);
+        await loadGameState();
+        const refresh = await fetch('/api/shop-catalog?player_id=default');
+        if (refresh.ok) {
+            const d = await refresh.json();
+            renderShopList(d.items || [], d.coins || 0);
+        }
+    } catch (e) {
+        showToast('网络错误：' + e.message);
+    }
+}

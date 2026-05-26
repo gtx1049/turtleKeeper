@@ -87,6 +87,21 @@
                 <span class="btn-icon">👋</span>
                 <span class="btn-text">互动</span>
             </button>
+            <button class="action-btn" data-action="shop">
+                <span class="btn-icon">🛒</span>
+                <span class="btn-text">商店</span>
+            </button>
+        </div>
+
+        <!-- 商店弹窗 -->
+        <div id="shop-modal" class="modal hidden">
+            <div class="modal-content wide">
+                <h3>🛒 龟乐园补给商店</h3>
+                <p class="modal-tip">食物会随喂食消耗，及时补货避免龟龟餠胚。默认一次买一包；长按可一次买 5 包。</p>
+                <div id="shop-coins" class="shop-coins"></div>
+                <div id="shop-list"></div>
+                <button class="close-btn">关闭</button>
+            </div>
         </div>
 
         <!-- 喂食弹窗 -->

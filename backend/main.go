@@ -40,6 +40,8 @@ func main() {
 	http.HandleFunc("/api/advance-day", ensurePlayerMiddleware(handleAdvanceDay))
 	http.HandleFunc("/api/species", handleGetSpecies)
 	http.HandleFunc("/api/decor-catalog", handleGetDecorCatalog)
+	http.HandleFunc("/api/shop-catalog", handleGetShopCatalog)
+	http.HandleFunc("/api/buy-item", ensurePlayerMiddleware(handleBuyItem))
 	http.HandleFunc("/api/buy-species", ensurePlayerMiddleware(handleBuySpecies))
 	http.HandleFunc("/api/create-tank", ensurePlayerMiddleware(handleCreateTank))
 	http.HandleFunc("/api/move-turtle", ensurePlayerMiddleware(handleMoveTurtle))

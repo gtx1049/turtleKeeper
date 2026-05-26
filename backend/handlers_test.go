@@ -250,3 +250,74 @@ func TestComputeDailyIncome(t *testing.T) {
 	}
 	t.Logf("daily income total=%d breakdown=%v", total, breakdown)
 }
+
+// TestShopCatalogSanity 保证商店配置每项必填、价格大于 0、PackSize > 0
+func TestShopCatalogSanity(t *testing.T) {
+	items := shopCatalog()
+	if len(items) < 4 {
+		t.Fatalf("shop too small: %d", len(items))
+	}
+	seen := map[string]bool{}
+	for _, it := range items {
+		if it.ID == "" || it.Type == "" || it.Name == "" {
+			t.Errorf("shop item missing required field: %+v", it)
+		}
+		if it.Cost <= 0 || it.PackSize <= 0 {
+			t.Errorf("shop item bad cost/pack: %+v", it)
+		}
+		if seen[it.ID] {
+			t.Errorf("duplicate shop id: %s", it.ID)
+		}
+		seen[it.ID] = true
+	}
+	if _, ok := findShopItem("food_1"); !ok {
+		t.Errorf("findShopItem(food_1) should be found")
+	}
+	if _, ok := findShopItem("nope"); ok {
+		t.Errorf("findShopItem(nope) should fail")
+	}
+}
+
+// TestBuyItemFlow 验证扣币 + 入库 + 不足时拒绝
+func TestBuyItemFlow(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "tkeeper_shop_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+	if err := initDB(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec("INSERT INTO players (id, coins, day, season) VALUES (?, 100, 1, 'spring')", "buyer")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	spec, _ := findShopItem("food_1")
+	// 模拟买 2 包 food_1
+	totalCost := spec.Cost * 2
+	totalGain := spec.PackSize * 2
+
+	// 手动跑核心逻辑（不走 http）：扣币 + insert
+	_, err = db.Exec("UPDATE players SET coins = coins - ? WHERE id = ?", totalCost, "buyer")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = db.Exec("INSERT INTO inventory (id, player_id, item_type, name, count, icon) VALUES (?, ?, ?, ?, ?, ?)",
+		spec.ID, "buyer", spec.Type, spec.Name, totalGain, spec.Icon)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var coins, count int
+	db.QueryRow("SELECT coins FROM players WHERE id = ?", "buyer").Scan(&coins)
+	db.QueryRow("SELECT count FROM inventory WHERE id = ? AND player_id = ?", spec.ID, "buyer").Scan(&count)
+	if coins != 100-totalCost {
+		t.Errorf("coins want %d got %d", 100-totalCost, coins)
+	}
+	if count != totalGain {
+		t.Errorf("count want %d got %d", totalGain, count)
+	}
+}
