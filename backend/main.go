@@ -39,6 +39,7 @@ func main() {
 	http.HandleFunc("/api/move-decor", ensurePlayerMiddleware(handleMoveDecor))
 	http.HandleFunc("/api/advance-day", ensurePlayerMiddleware(handleAdvanceDay))
 	http.HandleFunc("/api/species", handleGetSpecies)
+	http.HandleFunc("/api/pokedex", handleGetPokedex)
 	http.HandleFunc("/api/decor-catalog", handleGetDecorCatalog)
 	http.HandleFunc("/api/shop-catalog", handleGetShopCatalog)
 	http.HandleFunc("/api/buy-item", ensurePlayerMiddleware(handleBuyItem))

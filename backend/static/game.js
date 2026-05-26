@@ -560,7 +560,14 @@ function drawTurtle(t, w, h) {
     const y = h * 0.6 + Math.sin(t.swimPhase) * 10;
     const dir = t.direction;
     const v = getTurtleVisual(t.species);
-    const px = Math.max(3, Math.min(5, Math.floor(Math.min(w, h) / 105))) * v.scale;
+    // 幼龟渐进缩放：出生头 14 天 60% 大小，30 天后恢复正常，中间线性插值
+    let ageScale = 1;
+    const age = (gameState.day || 1) - (t.birth_day || 0);
+    if (t.birth_day && t.birth_day > 1) {
+        if (age <= 14) ageScale = 0.6;
+        else if (age < 30) ageScale = 0.6 + (age - 14) * (0.4 / 16);
+    }
+    const px = Math.max(3, Math.min(5, Math.floor(Math.min(w, h) / 105))) * v.scale * ageScale;
 
     ctx.save();
     ctx.translate(x, y);
@@ -578,8 +585,10 @@ function drawTurtle(t, w, h) {
     ctx.font = '10px system-ui, sans-serif';
     ctx.textAlign = 'center';
     ctx.fillStyle = 'rgba(15, 23, 42, 0.45)';
-    const label = t.name || v.label;
-    const labelW = Math.min(58, ctx.measureText(label).width + 12);
+    // 幼龟加个小标识
+    const babyTag = ageScale < 1 ? ' 🐣' : '';
+    const label = (t.name || v.label) + babyTag;
+    const labelW = Math.min(70, ctx.measureText(label).width + 12);
     ctx.fillRect(-labelW / 2, 24 * px / 4, labelW, 14);
     ctx.fillStyle = '#f8fafc';
     ctx.fillText(label, 0, 24 * px / 4 + 10);
@@ -1254,24 +1263,50 @@ async function showEggsModal() {
 async function showCollection() {
     const modal = document.getElementById('collection-modal');
     const list = document.getElementById('species-list');
-    list.innerHTML = '';
-    
+    list.innerHTML = '<div class="pokedex-loading">加载中…</div>';
+
     try {
-        const res = await fetch(`${API_BASE}/api/species`);
-        const species = await res.json();
-        
-        species.forEach(s => {
-            const isUnlocked = gameState.unlocked_species.includes(s.id);
+        const res = await fetch(`${API_BASE}/api/pokedex?player_id=default`);
+        const data = await res.json();
+        const entries = data.entries || [];
+        list.innerHTML = '';
+
+        // 头部：完成度进度条
+        const header = document.createElement('div');
+        header.className = 'pokedex-header';
+        header.innerHTML = `
+            <div class="pokedex-stat">
+                <span class="pokedex-stat-label">图鉴完成度</span>
+                <span class="pokedex-stat-value">${data.unlocked}/${data.total} · ${data.completion_pct}%</span>
+            </div>
+            <div class="pokedex-progress"><div class="pokedex-progress-fill" style="width:${data.completion_pct}%"></div></div>
+        `;
+        list.appendChild(header);
+
+        entries.forEach(entry => {
+            const s = entry.species;
+            const isUnlocked = entry.unlocked;
             const card = document.createElement('div');
             card.className = 'species-card' + (isUnlocked ? '' : ' locked');
-            const ownedCount = gameState.turtles.filter(t => t.species === s.id).length;
             const canBuy = s.unlock_cost > 0;
+            const ownedTag = entry.owned_count ? `· 在养×${entry.owned_count}` : '';
+            const hatchedTag = entry.hatched_count > 0 ? `· 🐣×${entry.hatched_count}` : '';
+            const unlockDayTag = isUnlocked && entry.unlock_day > 0 ? `<span class="species-unlock-day">📅 第 ${entry.unlock_day} 天解锁</span>` : '';
+            const triviaBlock = isUnlocked && s.trivia ? `
+                <div class="species-bio">
+                    ${s.scientific_name ? `<div class="species-bio-row"><span class="bio-key">学名</span><i>${s.scientific_name}</i></div>` : ''}
+                    ${s.native_region ? `<div class="species-bio-row"><span class="bio-key">产地</span>${s.native_region}</div>` : ''}
+                    ${s.adult_size ? `<div class="species-bio-row"><span class="bio-key">成年</span>${s.adult_size}</div>` : ''}
+                    <div class="species-trivia">💡 ${s.trivia}</div>
+                </div>` : '';
             card.innerHTML = `
                 <span class="species-emoji">${isUnlocked ? getTurtleAvatarMarkup(s.id) : '🔒'}</span>
                 <div class="species-info">
-                    <div class="species-name">${s.name}${ownedCount ? ` ×${ownedCount}` : ''}</div>
+                    <div class="species-name">${isUnlocked ? s.name : '???'} <span class="species-counts">${ownedTag} ${hatchedTag}</span></div>
                     <div class="species-category">${s.category} · ${'⭐'.repeat(s.difficulty)} · ${habitatName(s.habitat_type)}</div>
+                    ${unlockDayTag}
                     <div class="species-desc">${s.description}</div>
+                    ${triviaBlock}
                     ${!isUnlocked ? `<div class="species-unlock">🔓 ${s.unlock_condition}${s.unlock_cost > 0 ? ` · ${s.unlock_cost} 龟币` : ''}</div>` : ''}
                     ${canBuy ? `<button class="buy-species-btn" data-species-id="${s.id}">${isUnlocked ? '再领养一只' : `购买领养 · ${s.unlock_cost}币`}</button>` : '<div class="species-owned">已入住初始龟缸</div>'}
                 </div>
@@ -1280,7 +1315,7 @@ async function showCollection() {
             if (buyBtn) buyBtn.addEventListener('click', () => buySpecies(s));
             list.appendChild(card);
         });
-        
+
         modal.classList.remove('hidden');
     } catch (e) {
         showToast('加载图鉴失败');

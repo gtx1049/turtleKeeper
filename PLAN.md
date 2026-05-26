@@ -214,3 +214,12 @@ type Tank struct {
 - 部署：先接 miniOldGame 大厅蹭流量，火了再独立
 
 🐢 你拍下这几个问题，我马上开 M1：用像素精灵工具生成第一批龟。
+
+---
+
+## 九、🤖 AI 测试员日志（自动追加）
+
+> 每 5 小时由养龟专家子agent自动游玩、找bug、提改进建议。最新在最上。
+
+<!-- AI_TESTER_LOG_START -->
+<!-- AI_TESTER_LOG_END -->

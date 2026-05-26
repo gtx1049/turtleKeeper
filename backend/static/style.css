@@ -436,6 +436,85 @@ body {
     margin-top: 4px;
 }
 
+/* 图鉴 v2 新增 */
+.pokedex-loading {
+    text-align: center;
+    padding: 24px;
+    color: #94a3b8;
+}
+.pokedex-header {
+    background: linear-gradient(120deg, rgba(34,197,94,0.18), rgba(59,130,246,0.18));
+    border: 1px solid rgba(255,255,255,0.08);
+    border-radius: 12px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+}
+.pokedex-stat {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 8px;
+}
+.pokedex-stat-label {
+    color: #cbd5e1;
+    font-size: 13px;
+}
+.pokedex-stat-value {
+    color: #fef3c7;
+    font-weight: bold;
+    font-size: 16px;
+}
+.pokedex-progress {
+    width: 100%;
+    height: 8px;
+    background: rgba(255,255,255,0.08);
+    border-radius: 4px;
+    overflow: hidden;
+}
+.pokedex-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #22c55e, #84cc16);
+    transition: width 0.4s ease;
+}
+.species-counts {
+    font-size: 12px;
+    color: #a7f3d0;
+    font-weight: normal;
+    margin-left: 4px;
+}
+.species-unlock-day {
+    display: inline-block;
+    font-size: 11px;
+    color: #93c5fd;
+    background: rgba(59,130,246,0.12);
+    border-radius: 8px;
+    padding: 1px 8px;
+    margin-top: 4px;
+}
+.species-bio {
+    margin-top: 8px;
+    padding: 8px 10px;
+    background: rgba(15,23,42,0.45);
+    border-radius: 8px;
+    border-left: 3px solid #22c55e;
+}
+.species-bio-row {
+    font-size: 12px;
+    color: #cbd5e1;
+    margin-bottom: 2px;
+}
+.species-bio-row .bio-key {
+    display: inline-block;
+    width: 32px;
+    color: #94a3b8;
+}
+.species-trivia {
+    font-size: 12px;
+    color: #fde68a;
+    margin-top: 6px;
+    line-height: 1.5;
+}
+
 
 /* 维护 / 布景 */
 .maintenance-item {

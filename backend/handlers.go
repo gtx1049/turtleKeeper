@@ -200,6 +200,19 @@ type SpeciesInfo struct {
 	UnlockCost      int    `json:"unlock_cost"`
 	HabitatType     string `json:"habitat_type"`
 	UnlockCondition string `json:"unlock_condition"`
+	Trivia          string `json:"trivia"`           // 图鉴里展示的生物学小科普
+	ScientificName  string `json:"scientific_name"`  // 学名
+	NativeRegion    string `json:"native_region"`    // 原产地
+	AdultSize       string `json:"adult_size"`       // 成年体型
+}
+
+// PokedexEntry 单条图鉴信息：基础龟种信息 + 玩家维度的解锁/拥有状态
+type PokedexEntry struct {
+	Species     SpeciesInfo `json:"species"`
+	Unlocked    bool        `json:"unlocked"`
+	UnlockDay   int         `json:"unlock_day"`
+	OwnedCount  int         `json:"owned_count"`     // 当前在养的数量
+	HatchedCount int        `json:"hatched_count"`   // 历史上孵化出来的数量（粗略：当前 birth_day>1 的）
 }
 
 // 全局数据库连接
@@ -297,6 +310,7 @@ func initDB(dataDir string) error {
 	CREATE TABLE IF NOT EXISTS unlocked_species (
 		player_id TEXT,
 		species_id TEXT,
+		unlock_day INTEGER DEFAULT 0,
 		PRIMARY KEY (player_id, species_id)
 	);
 
@@ -325,8 +339,38 @@ func initDB(dataDir string) error {
 	CREATE INDEX IF NOT EXISTS idx_eggs_player ON eggs(player_id);
 	`
 
-	_, err = db.Exec(schema)
-	return err
+	if _, err = db.Exec(schema); err != nil {
+		return err
+	}
+
+	// 在线迁移：给老库补 unlocked_species.unlock_day 列
+	// ALTER TABLE ADD COLUMN 在 SQLite 里幂等性差，要先查 PRAGMA
+	if !columnExists("unlocked_species", "unlock_day") {
+		db.Exec("ALTER TABLE unlocked_species ADD COLUMN unlock_day INTEGER DEFAULT 0")
+	}
+	return nil
+}
+
+// columnExists 检查表里是否已有某列，用于幂等迁移
+func columnExists(table, column string) bool {
+	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
+	if err != nil {
+		return false
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var cid int
+		var name, ctype string
+		var notnull, pk int
+		var dfltValue sql.NullString
+		if err := rows.Scan(&cid, &name, &ctype, &notnull, &dfltValue, &pk); err != nil {
+			continue
+		}
+		if name == column {
+			return true
+		}
+	}
+	return false
 }
 
 // 获取或创建玩家
@@ -497,9 +541,16 @@ func initAchievements(playerID string) {
 func initUnlockedSpecies(playerID string) {
 	species := []string{"muskTurtle", "chinesePondTurtle"}
 	for _, s := range species {
-		db.Exec("INSERT OR IGNORE INTO unlocked_species (player_id, species_id) VALUES (?, ?)",
-			playerID, s)
+		db.Exec("INSERT OR IGNORE INTO unlocked_species (player_id, species_id, unlock_day) VALUES (?, ?, ?)",
+			playerID, s, 1)
 	}
+}
+
+// unlockSpeciesForPlayer 给玩家解锁某龟种，记录解锁日。
+// 已解锁则保留旧 unlock_day，不覆盖。
+func unlockSpeciesForPlayer(playerID, speciesID string, day int) {
+	db.Exec("INSERT OR IGNORE INTO unlocked_species (player_id, species_id, unlock_day) VALUES (?, ?, ?)",
+		playerID, speciesID, day)
 }
 
 // 加载乌龟
@@ -1506,6 +1557,9 @@ func advanceBreeding(playerID string, day int, season string) (int, int, []strin
 			personality, initVitality, initAppetite, initSkin, initShell,
 			10, 0, e.TankID, 70, 90, 80)
 
+		// 保险解锁图鉴：该龟种如果之前未解锁（理论上不会，但万一），补上解锁记录
+		unlockSpeciesForPlayer(playerID, e.Species, day)
+
 		spName := e.Species
 		if sp.ID != "" {
 			spName = sp.Name
@@ -1559,14 +1613,30 @@ func getSeason(day int) string {
 
 func speciesCatalog() []SpeciesInfo {
 	return []SpeciesInfo{
-		{ID: "muskTurtle", Name: "麝香龟", Category: "蛋龟", Difficulty: 1, Description: "体小、皮实、爱钻洞", UnlockCost: 0, HabitatType: "deep", UnlockCondition: "初始赠送"},
-		{ID: "razorbackTurtle", Name: "剃刀龟", Category: "蛋龟", Difficulty: 2, Description: "头大壳高、性格凶", UnlockCost: 500, HabitatType: "deep", UnlockCondition: "商店购买"},
-		{ID: "loggerheadMuskTurtle", Name: "果核泥龟", Category: "蛋龟", Difficulty: 2, Description: "黄色三道纹、温顺", UnlockCost: 600, HabitatType: "deep", UnlockCondition: "商店购买"},
-		{ID: "chinesePondTurtle", Name: "中华草龟", Category: "水龟", Difficulty: 1, Description: "国民龟、墨化老头乐", UnlockCost: 0, HabitatType: "middle", UnlockCondition: "初始赠送"},
-		{ID: "yellowPondTurtle", Name: "黄喉拟水龟", Category: "水龟", Difficulty: 2, Description: "大青/小青、活泼亲人", UnlockCost: 800, HabitatType: "middle", UnlockCondition: "商店购买"},
-		{ID: "chineseStripeTurtle", Name: "中华花龟", Category: "水龟", Difficulty: 2, Description: "颈纹密布、群居热闹", UnlockCost: 1000, HabitatType: "middle", UnlockCondition: "商店购买"},
-		{ID: "redEaredSlider", Name: "巴西龟", Category: "水龟", Difficulty: 1, Description: "入侵物种警示，请勿野放", UnlockCost: 300, HabitatType: "middle", UnlockCondition: "商店购买（带科普）"},
-		{ID: "yellowMarginTurtle", Name: "黄缘闭壳龟", Category: "半水龟", Difficulty: 4, Description: "国宝级、能闭壳、贵", UnlockCost: 2000, HabitatType: "land", UnlockCondition: "成就解锁"},
+		{ID: "muskTurtle", Name: "麝香龟", Category: "蛋龟", Difficulty: 1, Description: "体小、皮实、爱钻洞", UnlockCost: 0, HabitatType: "deep", UnlockCondition: "初始赠送",
+			ScientificName: "Sternotherus odoratus", NativeRegion: "北美东部", AdultSize: "10-13cm",
+			Trivia: "受惊会从腋窝腺体喷出麝香味液体，故名「臭味龟」(Stinkpot)。深水蛋龟一族，幼体在水下爬行而非游泳。"},
+		{ID: "razorbackTurtle", Name: "剃刀龟", Category: "蛋龟", Difficulty: 2, Description: "头大壳高、性格凶", UnlockCost: 500, HabitatType: "deep", UnlockCondition: "商店购买",
+			ScientificName: "Sternotherus carinatus", NativeRegion: "美国南部", AdultSize: "10-15cm",
+			Trivia: "背甲中央有明显高耸的脊棱，像剃刀刀刃。咬合力惊人，混养需谨慎。"},
+		{ID: "loggerheadMuskTurtle", Name: "果核泥龟", Category: "蛋龟", Difficulty: 2, Description: "黄色三道纹、温顺", UnlockCost: 600, HabitatType: "deep", UnlockCondition: "商店购买",
+			ScientificName: "Sternotherus minor", NativeRegion: "美国东南部", AdultSize: "7-12cm",
+			Trivia: "头部宽厚像「果核」，下颌有须状突起。幼体头侧三道金黄条纹是最大辨识特征。"},
+		{ID: "chinesePondTurtle", Name: "中华草龟", Category: "水龟", Difficulty: 1, Description: "国民龟、墨化老头乐", UnlockCost: 0, HabitatType: "middle", UnlockCondition: "初始赠送",
+			ScientificName: "Mauremys reevesii", NativeRegion: "中国/朝鲜半岛/日本", AdultSize: "15-20cm",
+			Trivia: "成年公龟会全身墨化（黑化），俗称「墨龟/老头乐」。中国传统文化里长寿吉祥的代表。"},
+		{ID: "yellowPondTurtle", Name: "黄喉拟水龟", Category: "水龟", Difficulty: 2, Description: "大青/小青、活泼亲人", UnlockCost: 800, HabitatType: "middle", UnlockCondition: "商店购买",
+			ScientificName: "Mauremys mutica", NativeRegion: "中国南部/越南/日本", AdultSize: "15-22cm",
+			Trivia: "颈部黄色，两侧有黄白纵纹。按产地分大青(广东)和小青(越南)两个品系，宠物市场最热门。"},
+		{ID: "chineseStripeTurtle", Name: "中华花龟", Category: "水龟", Difficulty: 2, Description: "颈纹密布、群居热闹", UnlockCost: 1000, HabitatType: "middle", UnlockCondition: "商店购买",
+			ScientificName: "Mauremys sinensis", NativeRegion: "中国南部/越南/台湾", AdultSize: "20-25cm",
+			Trivia: "头颈布满细密黄绿色纵纹，故又名「珍珠龟」。群居性强，多只混养更活跃。"},
+		{ID: "redEaredSlider", Name: "巴西龟", Category: "水龟", Difficulty: 1, Description: "入侵物种警示，请勿野放", UnlockCost: 300, HabitatType: "middle", UnlockCondition: "商店购买（带科普）",
+			ScientificName: "Trachemys scripta elegans", NativeRegion: "美国密西西比河流域", AdultSize: "20-30cm",
+			Trivia: "⚠️ 全球百大入侵物种。在中国南方野外繁殖已严重威胁本土水龟。养就养一辈子，绝不可野放。"},
+		{ID: "yellowMarginTurtle", Name: "黄缘闭壳龟", Category: "半水龟", Difficulty: 4, Description: "国宝级、能闭壳、贵", UnlockCost: 2000, HabitatType: "land", UnlockCondition: "成就解锁",
+			ScientificName: "Cuora flavomarginata", NativeRegion: "中国大陆/台湾", AdultSize: "15-19cm",
+			Trivia: "背甲与腹甲之间有铰链，受惊可完全闭壳保护头尾。CITES 附录Ⅱ保护物种，繁殖代售合法但请认准来源。"},
 	}
 }
 
@@ -1582,6 +1652,86 @@ func findSpecies(speciesID string) (SpeciesInfo, bool) {
 func handleGetSpecies(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(speciesCatalog())
+}
+
+// handleGetPokedex 返回玩家维度的完整图鉴：所有龟种 + 是否解锁 + 解锁日 + 拥有数 + 孵化数
+// 未解锁仍会返回基本信息（名字/分类/难度/条件），但不返回 trivia、学名、产地、体型
+// 让玩家有「发现」的期待感。
+func handleGetPokedex(w http.ResponseWriter, r *http.Request) {
+	playerID := r.URL.Query().Get("player_id")
+	if playerID == "" {
+		playerID = "default"
+	}
+	if _, err := getOrCreatePlayer(playerID); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	unlocked := map[string]int{}
+	rows, err := db.Query("SELECT species_id, COALESCE(unlock_day,0) FROM unlocked_species WHERE player_id = ?", playerID)
+	if err == nil {
+		defer rows.Close()
+		for rows.Next() {
+			var sid string
+			var day int
+			if err := rows.Scan(&sid, &day); err == nil {
+				unlocked[sid] = day
+			}
+		}
+	}
+
+	owned := map[string]int{}
+	hatched := map[string]int{}
+	trows, err := db.Query("SELECT species, birth_day FROM turtles WHERE player_id = ?", playerID)
+	if err == nil {
+		defer trows.Close()
+		for trows.Next() {
+			var sp string
+			var bd int
+			if err := trows.Scan(&sp, &bd); err == nil {
+				owned[sp]++
+				if bd > 1 {
+					hatched[sp]++
+				}
+			}
+		}
+	}
+
+	entries := []PokedexEntry{}
+	for _, sp := range speciesCatalog() {
+		day, ok := unlocked[sp.ID]
+		entry := PokedexEntry{
+			Species:      sp,
+			Unlocked:     ok,
+			UnlockDay:    day,
+			OwnedCount:   owned[sp.ID],
+			HatchedCount: hatched[sp.ID],
+		}
+		if !ok {
+			// 未解锁：隐藏 trivia / 学名 / 产地 / 体型，保留诱惑性
+			entry.Species.Trivia = ""
+			entry.Species.ScientificName = ""
+			entry.Species.NativeRegion = ""
+			entry.Species.AdultSize = ""
+			entry.Species.Description = "???"
+		}
+		entries = append(entries, entry)
+	}
+
+	totalUnlocked := 0
+	for _, e := range entries {
+		if e.Unlocked {
+			totalUnlocked++
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"entries":         entries,
+		"total":           len(entries),
+		"unlocked":        totalUnlocked,
+		"completion_pct":  int(float64(totalUnlocked) / float64(len(entries)) * 100),
+	})
 }
 
 // handleGetDecorCatalog 返回 M3 布景白名单，前端不再写死。
@@ -1761,7 +1911,9 @@ func handleBuySpecies(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	db.Exec("INSERT OR IGNORE INTO unlocked_species (player_id, species_id) VALUES (?, ?)", req.PlayerID, req.SpeciesID)
+	var curDay int
+	db.QueryRow("SELECT day FROM players WHERE id = ?", req.PlayerID).Scan(&curDay)
+	unlockSpeciesForPlayer(req.PlayerID, req.SpeciesID, curDay)
 
 	// 创建新乌龟并自动入住匹配水位的龟缸，避免买完龟出现在“无家可归”状态。
 	turtleID := fmt.Sprintf("turtle_%d", time.Now().UnixNano())

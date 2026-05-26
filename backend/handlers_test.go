@@ -429,3 +429,52 @@ func TestAdvanceBreeding(t *testing.T) {
 		t.Errorf("expected new turtle hatched from quality-95 egg, before=%d after=%d", beforeTurtles, afterTurtles)
 	}
 }
+
+// TestPokedexUnlockDay 验证图鉴 unlock_day 迁移、保留与隐藏未解锁字段
+func TestPokedexUnlockDay(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "tkeeper_pokedex_*")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(tmpDir)
+	if err := initDB(tmpDir); err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	// 创建玩家：初始解锁两个龟种
+	_, err = getOrCreatePlayer("p_pkdx")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// 推进到 day 5，再解锁巴西龟
+	db.Exec("UPDATE players SET day = 5 WHERE id = ?", "p_pkdx")
+	unlockSpeciesForPlayer("p_pkdx", "redEaredSlider", 5)
+
+	// 查 unlock_day
+	var day int
+	err = db.QueryRow("SELECT unlock_day FROM unlocked_species WHERE player_id=? AND species_id=?",
+		"p_pkdx", "redEaredSlider").Scan(&day)
+	if err != nil {
+		t.Fatalf("query unlock_day: %v", err)
+	}
+	if day != 5 {
+		t.Errorf("expected unlock_day=5, got %d", day)
+	}
+
+	// 重复解锁不应覆盖已有 unlock_day
+	unlockSpeciesForPlayer("p_pkdx", "redEaredSlider", 99)
+	db.QueryRow("SELECT unlock_day FROM unlocked_species WHERE player_id=? AND species_id=?",
+		"p_pkdx", "redEaredSlider").Scan(&day)
+	if day != 5 {
+		t.Errorf("INSERT OR IGNORE should keep unlock_day=5, got %d", day)
+	}
+
+	// 初始 muskTurtle 应该有 unlock_day=1
+	db.QueryRow("SELECT unlock_day FROM unlocked_species WHERE player_id=? AND species_id=?",
+		"p_pkdx", "muskTurtle").Scan(&day)
+	if day != 1 {
+		t.Errorf("expected initial muskTurtle unlock_day=1, got %d", day)
+	}
+}
