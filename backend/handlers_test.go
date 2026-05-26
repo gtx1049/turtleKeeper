@@ -321,3 +321,28 @@ func TestBuyItemFlow(t *testing.T) {
 		t.Errorf("count want %d got %d", totalGain, count)
 	}
 }
+
+// TestFoodEffect 保证所有上架食物都有差异化效果，且默认分支不崩
+func TestFoodEffect(t *testing.T) {
+	specs := []string{"food_1", "food_2", "food_3", "food_4", "tool_2"}
+	seenHungers := map[int]bool{}
+	for _, id := range specs {
+		h, i, v, m := foodEffect(id)
+		if h < 0 || i < 0 || v < 0 || m < 0 {
+			t.Errorf("%s effect has negative: %d %d %d %d", id, h, i, v, m)
+		}
+		if h+i+v+m == 0 {
+			t.Errorf("%s effect is all zero, lacks gameplay value", id)
+		}
+		seenHungers[h] = true
+	}
+	// 至少应该有 3 种不同的饱腹值，否则差异化失败
+	if len(seenHungers) < 3 {
+		t.Errorf("food hunger values not diverse enough: %v", seenHungers)
+	}
+	// 默认分支
+	h, _, _, _ := foodEffect("unknown_food")
+	if h <= 0 {
+		t.Errorf("default food should have positive hunger, got %d", h)
+	}
+}

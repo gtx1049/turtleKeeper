@@ -620,14 +620,59 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 
-	// 更新乌龟饥饿度
-	db.Exec("UPDATE turtles SET hunger = MIN(100, hunger + 30), intimacy = MIN(100, intimacy + 2) WHERE id = ?", req.TurtleID)
+	// 验证背包里还有该食物，避免刷接口刷负数
+	var haveCount int
+	err := db.QueryRow("SELECT count FROM inventory WHERE id = ? AND player_id = ?", req.FoodID, req.PlayerID).Scan(&haveCount)
+	if err == sql.ErrNoRows || haveCount <= 0 {
+		http.Error(w, "该食物已用完，请到商店补货", http.StatusBadRequest)
+		return
+	} else if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// 不同食物效果不同，记住买什么不仅仅是堆数量。
+	hungerDelta, intimacyDelta, vitalityDelta, moodDelta := foodEffect(req.FoodID)
+	db.Exec(`UPDATE turtles SET
+		hunger     = MIN(100, hunger + ?),
+		intimacy   = MIN(100, intimacy + ?),
+		vitality   = MIN(100, vitality + ?),
+		mood       = MIN(100, mood + ?)
+		WHERE id = ?`, hungerDelta, intimacyDelta, vitalityDelta, moodDelta, req.TurtleID)
 
 	// 减少食物数量
 	db.Exec("UPDATE inventory SET count = count - 1 WHERE id = ? AND player_id = ?", req.FoodID, req.PlayerID)
 
+	// 喂食成就
+	db.Exec("UPDATE achievements SET unlocked = 1, unlock_day = (SELECT day FROM players WHERE id = ?) WHERE player_id = ? AND id = 'ach_2' AND unlocked = 0", req.PlayerID, req.PlayerID)
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":   "ok",
+		"hunger":   hungerDelta,
+		"intimacy": intimacyDelta,
+		"vitality": vitalityDelta,
+		"mood":     moodDelta,
+	})
+}
+
+// foodEffect 返回指定食物 id 的四项加成 (hunger, intimacy, vitality, mood)
+// 跟 shopCatalog 里的描述保持一致，避免口说无凭。
+func foodEffect(foodID string) (hunger, intimacy, vitality, mood int) {
+	switch foodID {
+	case "food_1": // 龟粮：主粮均衡
+		return 30, 2, 0, 1
+	case "food_2": // 红虫：亲密度极高
+		return 22, 6, 1, 3
+	case "food_3": // 虾干：饱腹强、提甲
+		return 38, 1, 2, 0
+	case "food_4": // 小鱼苗：野性填充 + 活力
+		return 40, 4, 5, 2
+	case "tool_2": // 维生素片：补充品，不填股
+		return 0, 1, 20, 4
+	default: // 未知食物走默认值
+		return 25, 2, 0, 0
+	}
 }
 
 func handleClean(w http.ResponseWriter, r *http.Request) {
