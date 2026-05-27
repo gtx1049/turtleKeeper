@@ -12,6 +12,9 @@ let lastTime = 0;
 let draggedDecorId = null;
 let dragDirty = false;
 
+// M1 素材预加载缓存
+const spriteCache = {};
+
 // ============ 初始化 ============
 document.addEventListener('DOMContentLoaded', async () => {
     canvas = document.getElementById('tank-canvas');
@@ -23,12 +26,24 @@ document.addEventListener('DOMContentLoaded', async () => {
     // 加载游戏状态
     await loadGameState();
     
+    // M1 预加载像素素材
+    preloadSprites();
+    
     // 绑定事件
     bindEvents();
     
     // 启动渲染循环
     requestAnimationFrame(gameLoop);
 });
+
+function preloadSprites() {
+    SPRITE_SPECIES.forEach(species => {
+        const img = new Image();
+        img.src = `sprites/${species}.png`;
+        img.onload = () => { spriteCache[species] = img; };
+        img.onerror = () => { console.warn('素材加载失败:', species); };
+    });
+}
 
 function resizeCanvas() {
     const container = document.getElementById('tank-view');
@@ -578,7 +593,14 @@ function drawTurtle(t, w, h) {
     ctx.translate(0, bob);
     ctx.imageSmoothingEnabled = false;
 
-    drawPixelTurtleSprite(ctx, v, px, t.animFrame, t.blinkTimer);
+    // M1 优先使用真实 PNG 素材，fallback 程序化绘制
+    const spriteImg = spriteCache[t.species];
+    if (spriteImg && spriteImg.complete && spriteImg.naturalWidth > 0) {
+        const s = px * 1.8; // 32px 素材在画布上的显示尺寸
+        ctx.drawImage(spriteImg, -s / 2, -s / 2, s, s);
+    } else {
+        drawPixelTurtleSprite(ctx, v, px, t.animFrame, t.blinkTimer);
+    }
 
     // 名字小标签：多龟同缸时能快速分辨是哪只。
     ctx.scale(dir, 1);

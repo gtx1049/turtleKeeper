@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 func main() {
@@ -30,23 +31,26 @@ func main() {
 	http.Handle("/", fs)
 
 	// API 路由：统一通过 ensurePlayerMiddleware，避免写 API 冷启动后遇到 player not found。
-	http.HandleFunc("/api/state", handleGetState)
-	http.HandleFunc("/api/feed", ensurePlayerMiddleware(handleFeed))
-	http.HandleFunc("/api/clean", ensurePlayerMiddleware(handleClean))
-	http.HandleFunc("/api/maintain-tank", ensurePlayerMiddleware(handleMaintainTank))
-	http.HandleFunc("/api/interact", ensurePlayerMiddleware(handleInteract))
-	http.HandleFunc("/api/add-decor", ensurePlayerMiddleware(handleAddDecor))
-	http.HandleFunc("/api/move-decor", ensurePlayerMiddleware(handleMoveDecor))
-	http.HandleFunc("/api/advance-day", ensurePlayerMiddleware(handleAdvanceDay))
-	http.HandleFunc("/api/species", handleGetSpecies)
-	http.HandleFunc("/api/pokedex", handleGetPokedex)
-	http.HandleFunc("/api/decor-catalog", handleGetDecorCatalog)
-	http.HandleFunc("/api/shop-catalog", handleGetShopCatalog)
-	http.HandleFunc("/api/buy-item", ensurePlayerMiddleware(handleBuyItem))
-	http.HandleFunc("/api/buy-species", ensurePlayerMiddleware(handleBuySpecies))
-	http.HandleFunc("/api/create-tank", ensurePlayerMiddleware(handleCreateTank))
-	http.HandleFunc("/api/move-turtle", ensurePlayerMiddleware(handleMoveTurtle))
-	http.HandleFunc("/api/turtle", handleTurtleDetail)
+	// 统一套 loggingMiddleware，记录请求耗时与状态码。
+	api := http.NewServeMux()
+	api.HandleFunc("/api/state", handleGetState)
+	api.HandleFunc("/api/feed", ensurePlayerMiddleware(handleFeed))
+	api.HandleFunc("/api/clean", ensurePlayerMiddleware(handleClean))
+	api.HandleFunc("/api/maintain-tank", ensurePlayerMiddleware(handleMaintainTank))
+	api.HandleFunc("/api/interact", ensurePlayerMiddleware(handleInteract))
+	api.HandleFunc("/api/add-decor", ensurePlayerMiddleware(handleAddDecor))
+	api.HandleFunc("/api/move-decor", ensurePlayerMiddleware(handleMoveDecor))
+	api.HandleFunc("/api/advance-day", ensurePlayerMiddleware(handleAdvanceDay))
+	api.HandleFunc("/api/species", handleGetSpecies)
+	api.HandleFunc("/api/pokedex", handleGetPokedex)
+	api.HandleFunc("/api/decor-catalog", handleGetDecorCatalog)
+	api.HandleFunc("/api/shop-catalog", handleGetShopCatalog)
+	api.HandleFunc("/api/buy-item", ensurePlayerMiddleware(handleBuyItem))
+	api.HandleFunc("/api/buy-species", ensurePlayerMiddleware(handleBuySpecies))
+	api.HandleFunc("/api/create-tank", ensurePlayerMiddleware(handleCreateTank))
+	api.HandleFunc("/api/move-turtle", ensurePlayerMiddleware(handleMoveTurtle))
+	api.HandleFunc("/api/turtle", handleTurtleDetail)
+	http.Handle("/api/", loggingMiddleware(api))
 
 	// 获取端口
 	port := os.Getenv("PORT")
@@ -64,6 +68,27 @@ func main() {
 	if err := http.ListenAndServe(addr, nil); err != nil {
 		log.Fatal("服务器启动失败:", err)
 	}
+}
+
+// loggingMiddleware 记录每个请求的 method、path、status、耗时。
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		// 包装 ResponseWriter 以捕获状态码
+		lw := &loggingResponseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+		next.ServeHTTP(lw, r)
+		log.Printf("[%s] %s → %d (%s)", r.Method, r.URL.Path, lw.statusCode, time.Since(start))
+	})
+}
+
+type loggingResponseWriter struct {
+	http.ResponseWriter
+	statusCode int
+}
+
+func (lrw *loggingResponseWriter) WriteHeader(code int) {
+	lrw.statusCode = code
+	lrw.ResponseWriter.WriteHeader(code)
 }
 
 // ensurePlayerMiddleware 在任何写 API 调用前先懒初始化 default 玩家，

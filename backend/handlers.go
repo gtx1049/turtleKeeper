@@ -917,6 +917,17 @@ func maintainTank(playerID, tankID, mode string) (map[string]interface{}, error)
 		message = "完成 1/3 换水,水质明显好转"
 	case "deep_clean":
 		// 深度清洁:保留旧 /api/clean 的一键重置语义,但加入经营成本。
+		// 若水质已良好,提示无需清洁并免扣费。
+		if clarity >= 90 && ammonia < 0.3 {
+			return map[string]interface{}{
+				"status":        "ok",
+				"mode":          mode,
+				"cost":          0,
+				"message":       "水质良好,无需深度清洁",
+				"has_filter":    hasFilter == 1,
+				"water_quality": WaterStat{PH: 7.0, Ammonia: ammonia, Nitrite: nitrite, Clarity: clarity},
+			}, nil
+		}
 		cost = 60
 		clarity = 100
 		ammonia = 0
@@ -1105,8 +1116,110 @@ func handleAddDecor(w http.ResponseWriter, r *http.Request) {
 		db.Exec("UPDATE players SET coins = coins + 20 WHERE id = ?", req.PlayerID)
 	}
 
+	// M3 生态评分:计算该缸当前布景得分并返回
+	score := calculateTankDecorScore(req.TankID)
+
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{"status": "ok", "decor": req.Decor})
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":       "ok",
+		"decor":        req.Decor,
+		"ecoscore":     score.Score,
+		"ecoscore_max": score.Max,
+		"ecoscore_tips": score.Tips,
+	})
+}
+
+// EcoScore 布景生态评分结果
+type EcoScore struct {
+	Score int    `json:"score"`
+	Max   int    `json:"max"`
+	Tips  string `json:"tips"`
+}
+
+func calculateTankDecorScore(tankID string) EcoScore {
+	rows, err := db.Query("SELECT type FROM decor WHERE tank_id = ?", tankID)
+	if err != nil {
+		return EcoScore{Score: 0, Max: 100, Tips: "无法读取造景数据"}
+	}
+	defer rows.Close()
+
+	counts := map[string]int{}
+	var types []string
+	for rows.Next() {
+		var t string
+		if err := rows.Scan(&t); err == nil {
+			counts[t]++
+			if counts[t] == 1 {
+				types = append(types, t)
+			}
+		}
+	}
+
+	// 基础分
+	base := map[string]int{"wood": 10, "stone": 10, "plant": 15, "sponge": 10, "heater": 10, "driftwood_basking": 15}
+	score := 0
+	for t, c := range counts {
+		b := base[t]
+		if b == 0 {
+			b = 8
+		}
+		// 同类型堆叠递减:第1个100%,第2个70%,第3个49%...
+		for i := 0; i < c; i++ {
+			mul := 1.0
+			for j := 0; j < i; j++ {
+				mul *= 0.7
+			}
+			score += int(float64(b) * mul)
+		}
+	}
+
+	// 多样性 bonus
+	if len(types) >= 3 {
+		score += 15
+	}
+	if len(types) >= 5 {
+		score += 15
+	}
+
+	// 查询 tank 类型匹配 bonus
+	var wl string
+	db.QueryRow("SELECT water_level FROM tanks WHERE id = ?", tankID).Scan(&wl)
+	pref := map[string][]string{
+		"deep":   {"wood", "plant", "sponge", "heater"},
+		"middle": {"wood", "stone", "plant", "heater"},
+		"land":   {"stone", "driftwood_basking", "plant"},
+	}
+	if prefs, ok := pref[wl]; ok {
+		for _, p := range prefs {
+			if counts[p] > 0 {
+				score += 5
+			}
+		}
+	}
+
+	if score > 100 {
+		score = 100
+	}
+
+	tips := ""
+	switch {
+	case score >= 80:
+		tips = "生态完美！龟龟幸福感爆棚"
+	case score >= 60:
+		tips = "环境不错，继续丰富造景"
+	case score >= 40:
+		tips = "略显单调，多加点植物或躲避"
+	default:
+		tips = "龟缸太空了，快布置一下吧"
+	}
+	if wl == "deep" && counts["sponge"] == 0 && counts["heater"] == 0 {
+		tips = "深水缸建议至少配备过滤或加热设备"
+	}
+	if wl == "land" && counts["driftwood_basking"] == 0 {
+		tips = "半水陆缸缺少晒台，龟龟无法晒背"
+	}
+
+	return EcoScore{Score: score, Max: 100, Tips: tips}
 }
 
 func handleMoveDecor(w http.ResponseWriter, r *http.Request) {
@@ -1886,8 +1999,9 @@ func handleGetShopCatalog(w http.ResponseWriter, r *http.Request) {
 	db.QueryRow("SELECT coins FROM players WHERE id = ?", pid).Scan(&coins)
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"items": shopCatalog(),
-		"coins": coins,
+		"items":   shopCatalog(),
+		"species": speciesCatalog(),
+		"coins":   coins,
 	})
 }
 
