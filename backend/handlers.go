@@ -42,20 +42,21 @@ type Egg struct {
 
 // Turtle 乌龟
 type Turtle struct {
-	ID          string     `json:"id"`
-	Species     string     `json:"species"`
-	Name        string     `json:"name"`
-	Gender      string     `json:"gender"`
-	BirthDay    int        `json:"birth_day"`
-	Weight      float64    `json:"weight"`
-	Personality string     `json:"personality"`
-	Health      HealthStat `json:"health"`
-	Intimacy    int        `json:"intimacy"`
-	Melanism    int        `json:"melanism"`
-	TankID      string     `json:"tank_id"`
-	Hunger      int        `json:"hunger"`
-	Cleanliness int        `json:"cleanliness"`
-	Mood        int        `json:"mood"`
+	ID          string                   `json:"id"`
+	Species     string                   `json:"species"`
+	Name        string                   `json:"name"`
+	Gender      string                   `json:"gender"`
+	BirthDay    int                      `json:"birth_day"`
+	Weight      float64                  `json:"weight"`
+	Personality string                   `json:"personality"`
+	Health      HealthStat               `json:"health"`
+	Intimacy    int                      `json:"intimacy"`
+	Melanism    int                      `json:"melanism"`
+	TankID      string                   `json:"tank_id"`
+	Hunger      int                      `json:"hunger"`
+	Cleanliness int                      `json:"cleanliness"`
+	Mood        int                      `json:"mood"`
+	Suggestions []map[string]interface{} `json:"suggestions,omitempty"`
 }
 
 // HealthStat 健康状态
@@ -68,16 +69,17 @@ type HealthStat struct {
 
 // Tank 龟缸
 type Tank struct {
-	ID         string      `json:"id"`
-	Type       string      `json:"type"`
-	Name       string      `json:"name"`
-	WaterLevel string      `json:"water_level"`
-	Decor      []DecorItem `json:"decor"`
-	WaterQual  WaterStat   `json:"water_quality"`
-	TempDay    float64     `json:"temp_day"`
-	TempNight  float64     `json:"temp_night"`
-	HasUVB     bool        `json:"has_uvb"`
-	HasFilter  bool        `json:"has_filter"`
+	ID           string                   `json:"id"`
+	Type         string                   `json:"type"`
+	Name         string                   `json:"name"`
+	WaterLevel   string                   `json:"water_level"`
+	Decor        []DecorItem              `json:"decor"`
+	WaterQual    WaterStat                `json:"water_quality"`
+	TempDay      float64                  `json:"temp_day"`
+	TempNight    float64                  `json:"temp_night"`
+	HasUVB       bool                     `json:"has_uvb"`
+	HasFilter    bool                     `json:"has_filter"`
+	WaterHistory []map[string]interface{} `json:"water_history,omitempty"`
 }
 
 // WaterStat 水质
@@ -718,6 +720,36 @@ func handleGetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// 为每只龟追加智能建议（最多 2 条高优先级），让玩家一打开游戏就知道该干什么
+	for i := range state.Turtles {
+		t := &state.Turtles[i]
+		sp, _ := findSpecies(t.Species)
+		var tankMap map[string]interface{}
+		for _, tank := range state.Tanks {
+			if tank.ID == t.TankID {
+				tankMap = map[string]interface{}{
+					"water_level": tank.WaterLevel,
+					"ammonia":     tank.WaterQual.Ammonia,
+					"nitrite":     tank.WaterQual.Nitrite,
+					"clarity":     tank.WaterQual.Clarity,
+					"has_filter":  tank.HasFilter,
+					"has_uvb":     tank.HasUVB,
+				}
+				break
+			}
+		}
+		t.Suggestions = buildTurtleSuggestions(*t, sp, tankMap)
+		// 限制最多 2 条，避免 state 膨胀
+		if len(t.Suggestions) > 2 {
+			t.Suggestions = t.Suggestions[:2]
+		}
+	}
+
+	// 为每个龟缸追加最近 14 天水质历史，方便前端趋势展示
+	for i := range state.Tanks {
+		state.Tanks[i].WaterHistory = loadWaterHistory(state.Tanks[i].ID, 14)
+	}
+
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(state)
 }
@@ -761,11 +793,11 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]interface{}{
-		"status":   "ok",
-		"hunger":   hungerDelta,
-		"intimacy": intimacyDelta,
-		"vitality": vitalityDelta,
-		"mood":     moodDelta,
+		"status":         "ok",
+		"hunger_delta":   hungerDelta,
+		"intimacy_delta": intimacyDelta,
+		"vitality_delta": vitalityDelta,
+		"mood_delta":     moodDelta,
 	})
 }
 
@@ -792,11 +824,16 @@ func handleClean(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		PlayerID string `json:"player_id"`
 		TankID   string `json:"tank_id"`
+		TurtleID string `json:"turtle_id"`
 	}
 	json.NewDecoder(r.Body).Decode(&req)
 
 	if req.PlayerID == "" {
 		req.PlayerID = "default"
+	}
+	// 支持 turtle_id 自动解析所属 tank，提升 API 易用性
+	if req.TankID == "" && req.TurtleID != "" {
+		db.QueryRow("SELECT tank_id FROM turtles WHERE id = ? AND player_id = ?", req.TurtleID, req.PlayerID).Scan(&req.TankID)
 	}
 
 	result, err := maintainTank(req.PlayerID, req.TankID, "deep_clean")
@@ -1407,10 +1444,10 @@ func advancePlayerTurtles(playerID string) error {
 			healthDrop = 2
 		}
 
-		// 饥饿衰减：连续饥饿（hunger 已为 0）每 2 天额外损耗活力/食欲
+		// 饥饿衰减：连续饥饿（hunger 已为 0）每天额外损耗活力/食欲
 		starveDrop := 0
 		if turtle.Hunger <= 0 {
-			starveDrop = 1
+			starveDrop = 2
 		}
 
 		// M3 布景效果：适合中/陕水位龟种的晒台反馈
