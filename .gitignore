@@ -2,8 +2,11 @@
 backend/data_test/
 backend/turtlekeeper
 backend/turtlekeeper.exe
+backend/turtlekeeper_test
 # Binaries
 *.db
+*.db-shm
+*.db-wal
 # DB
 .DS_Store
 # Editor

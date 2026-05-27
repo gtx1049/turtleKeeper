@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -20,6 +21,15 @@ func main() {
 	// 初始化数据库
 	if err := initDB(dataDir); err != nil {
 		log.Fatal("数据库初始化失败:", err)
+	}
+
+	// 日志落盘：同时输出到 stderr 和文件（AI_TESTER P2）
+	logPath := filepath.Join(dataDir, "tk.log")
+	logFile, err := os.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+	if err == nil {
+		log.SetOutput(io.MultiWriter(os.Stderr, logFile))
+	} else {
+		log.Printf("警告: 无法打开日志文件 %s: %v", logPath, err)
 	}
 
 	// 静态文件服务
@@ -50,6 +60,7 @@ func main() {
 	api.HandleFunc("/api/create-tank", ensurePlayerMiddleware(handleCreateTank))
 	api.HandleFunc("/api/move-turtle", ensurePlayerMiddleware(handleMoveTurtle))
 	api.HandleFunc("/api/turtle", handleTurtleDetail)
+	api.HandleFunc("/api/breeding-hints", handleBreedingHints)
 	http.Handle("/api/", loggingMiddleware(api))
 
 	// 获取端口

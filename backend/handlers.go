@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"log"
 	"math"
 	mrand "math/rand"
 	_ "modernc.org/sqlite"
@@ -237,6 +238,14 @@ func initDB(dataDir string) error {
 	db, err = sql.Open("sqlite", dataDir+"/turtlekeeper.db")
 	if err != nil {
 		return err
+	}
+
+	// WAL 模式 + 5 秒 busy timeout，缓解并发写冲突（AI_TESTER P1）
+	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
+		log.Printf("警告: 无法设置 WAL 模式: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
+		log.Printf("警告: 无法设置 busy_timeout: %v", err)
 	}
 
 	// 创建表
@@ -2483,4 +2492,110 @@ func buildTurtleSuggestions(t Turtle, sp SpeciesInfo, tank map[string]interface{
 		out = append(out, map[string]interface{}{"level": "ok", "icon": "✅", "text": "一切安好,享受佛系养龟时光吧"})
 	}
 	return out
+}
+
+// handleBreedingHints 返回繁殖条件进度，让玩家知道每缸离产蛋还差多少。
+func handleBreedingHints(w http.ResponseWriter, r *http.Request) {
+	pid := r.URL.Query().Get("player_id")
+	if pid == "" {
+		pid = "default"
+	}
+	if _, err := getOrCreatePlayer(pid); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var day int
+	db.QueryRow("SELECT day FROM players WHERE id = ?", pid).Scan(&day)
+	season := getSeason(day)
+
+	rows, err := db.Query(`SELECT id, species, name, tank_id, gender, birth_day, intimacy, mood
+		FROM turtles WHERE player_id = ? ORDER BY tank_id`, pid)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	type ti struct {
+		ID, Species, Name, TankID, Gender string
+		BirthDay, Intimacy, Mood          int
+	}
+	byTank := map[string][]ti{}
+	for rows.Next() {
+		var t ti
+		rows.Scan(&t.ID, &t.Species, &t.Name, &t.TankID, &t.Gender, &t.BirthDay, &t.Intimacy, &t.Mood)
+		byTank[t.TankID] = append(byTank[t.TankID], t)
+	}
+	rows.Close()
+
+	var hints []map[string]interface{}
+	for tankID, ts := range byTank {
+		var adults []ti
+		for _, t := range ts {
+			if t.BirthDay <= day-20 {
+				adults = append(adults, t)
+			}
+		}
+		if len(adults) < 2 {
+			continue
+		}
+		var males, females []ti
+		for _, t := range adults {
+			if t.Gender == "♂" {
+				males = append(males, t)
+			} else if t.Gender == "♀" {
+				females = append(females, t)
+			}
+		}
+		if len(males) == 0 || len(females) == 0 {
+			continue
+		}
+		// 找最佳配对（平均亲密度最高且均≥0）
+		bestAvg := -1
+		var bestM, bestF ti
+		for _, m := range males {
+			for _, f := range females {
+				if m.Species != f.Species {
+					continue // 简化：同种才能繁殖
+				}
+				avg := (m.Intimacy + f.Intimacy) / 2
+				if avg > bestAvg {
+					bestAvg = avg
+					bestM, bestF = m, f
+				}
+			}
+		}
+		if bestM.ID == "" {
+			continue
+		}
+		progressM := bestM.Intimacy
+		progressF := bestF.Intimacy
+		ready := progressM >= 40 && progressF >= 40
+		seasonBonus := ""
+		if season == "spring" {
+			seasonBonus = "，春季产蛋概率×1.5"
+		}
+		msg := fmt.Sprintf("%s缸：%s♂(亲密度%d) + %s♀(亲密度%d) ", bestM.Name, bestM.Name, progressM, bestF.Name, progressF)
+		if ready {
+			msg += fmt.Sprintf("已满足繁殖条件%s", seasonBonus)
+		} else {
+			msg += fmt.Sprintf("繁殖需双方亲密度≥40%s", seasonBonus)
+		}
+		hints = append(hints, map[string]interface{}{
+			"tank_id":        tankID,
+			"ready":          ready,
+			"male":           map[string]interface{}{"id": bestM.ID, "name": bestM.Name, "intimacy": progressM},
+			"female":         map[string]interface{}{"id": bestF.ID, "name": bestF.Name, "intimacy": progressF},
+			"species":        bestM.Species,
+			"season_bonus":   season == "spring",
+			"message":        msg,
+		})
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status": "ok",
+		"day":    day,
+		"season": season,
+		"hints":  hints,
+	})
 }
