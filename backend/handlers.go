@@ -11,6 +11,16 @@ import (
 	"time"
 )
 
+// generateTurtleID 生成短随机字符串 ID,避免 UnixNano 大整数溢出 JS 安全范围。
+func generateTurtleID() string {
+	const alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+	b := make([]byte, 8)
+	for i := range b {
+		b[i] = alphabet[mrand.Intn(len(alphabet))]
+	}
+	return "turtle_" + string(b)
+}
+
 // GameState 游戏状态
 type GameState struct {
 	PlayerID        string          `json:"player_id"`
@@ -25,9 +35,9 @@ type GameState struct {
 	Eggs            []Egg           `json:"eggs"`
 }
 
-// Egg 龟蛋（M5 繁殖系统）
-// 由同缸异性龟产下，孵化期满后变为新龟。
-// 反映真实生物学：龟蛋需要一定天数才能孵化，且有成功率。
+// Egg 龟蛋(M5 繁殖系统)
+// 由同缸异性龟产下,孵化期满后变为新龟。
+// 反映真实生物学:龟蛋需要一定天数才能孵化,且有成功率。
 type Egg struct {
 	ID           string `json:"id"`
 	Species      string `json:"species"`
@@ -36,8 +46,8 @@ type Egg struct {
 	HatchDay     int    `json:"hatch_day"`
 	ParentMomID  string `json:"parent_mom_id"`
 	ParentDadID  string `json:"parent_dad_id"`
-	Quality      int    `json:"quality"`       // 0-100，影响孵化成功率与子代初始属性
-	DaysLeft     int    `json:"days_left"`     // 距离孵化还需多少天（不持久化，现算）
+	Quality      int    `json:"quality"`       // 0-100,影响孵化成功率与子代初始属性
+	DaysLeft     int    `json:"days_left"`     // 距离孵化还需多少天(不持久化,现算)
 }
 
 // Turtle 乌龟
@@ -100,8 +110,8 @@ type DecorItem struct {
 	Scale    float64 `json:"scale"`
 }
 
-// DecorSpec 描述一种布景的元信息与游戏效果（M3 布景=机制）。
-// effects 字段会被 advance-day 读取，把美观与玩法绑在一起。
+// DecorSpec 描述一种布景的元信息与游戏效果(M3 布景=机制)。
+// effects 字段会被 advance-day 读取,把美观与玩法绑在一起。
 type DecorSpec struct {
 	Type       string  `json:"type"`
 	Name       string  `json:"name"`
@@ -109,27 +119,27 @@ type DecorSpec struct {
 	Desc       string  `json:"desc"`
 	Cost       int     `json:"cost"`
 	Category   string  `json:"category"` // shelter / equipment / plant / basking
-	// 玩法效果：
-	FilterBoost  float64 `json:"filter_boost,omitempty"`  // 降低水质衰减系数（0~1，越大越稳）
+	// 玩法效果:
+	FilterBoost  float64 `json:"filter_boost,omitempty"`  // 降低水质衰减系数(0~1,越大越稳)
 	ClarityBoost int     `json:"clarity_boost,omitempty"` // 每天清澈度回补
-	Basking      bool    `json:"basking,omitempty"`       // 提供晒台（半水龟/水龟受益）
-	Shelter      bool    `json:"shelter,omitempty"`       // 提供躲藏（提升心情）
+	Basking      bool    `json:"basking,omitempty"`       // 提供晒台(半水龟/水龟受益)
+	Shelter      bool    `json:"shelter,omitempty"`       // 提供躲藏(提升心情)
 }
 
-// decorCatalog 是布景白名单（含 M3 新加的设备类）。
+// decorCatalog 是布景白名单(含 M3 新加的设备类)。
 // handleAddDecor 用它校验 type、并在前端 /api/decor-catalog 暴露。
 func decorCatalog() []DecorSpec {
 	return []DecorSpec{
-		{Type: "wood", Name: "沉木", Icon: "🪵", Desc: "麝香龟最爱钻洞，提升躲藏感。", Cost: 0, Category: "shelter", Shelter: true},
+		{Type: "wood", Name: "沉木", Icon: "🪵", Desc: "麝香龟最爱钻洞,提升躲藏感。", Cost: 0, Category: "shelter", Shelter: true},
 		{Type: "stone", Name: "晒台石", Icon: "🪨", Desc: "半水龟歇脚晒背的专属位。", Cost: 0, Category: "basking", Basking: true},
-		{Type: "plant", Name: "水草丛", Icon: "🌿", Desc: "少量降氨吸硝，画面也更鲜活。", Cost: 0, Category: "plant"},
-		{Type: "sponge", Name: "生化海绵", Icon: "🧽", Desc: "软过滤：没装过滤器的缸也能稳水。", Cost: 40, Category: "equipment", FilterBoost: 0.30, ClarityBoost: 1},
-		{Type: "heater", Name: "加热棒", Icon: "🌡️", Desc: "冬天不掉温，半水龟体感舒适。", Cost: 60, Category: "equipment", FilterBoost: 0.10},
+		{Type: "plant", Name: "水草丛", Icon: "🌿", Desc: "少量降氨吸硝,画面也更鲜活。", Cost: 0, Category: "plant"},
+		{Type: "sponge", Name: "生化海绵", Icon: "🧽", Desc: "软过滤:没装过滤器的缸也能稳水。", Cost: 40, Category: "equipment", FilterBoost: 0.30, ClarityBoost: 1},
+		{Type: "heater", Name: "加热棒", Icon: "🌡️", Desc: "冬天不掉温,半水龟体感舒适。", Cost: 60, Category: "equipment", FilterBoost: 0.10},
 		{Type: "driftwood_basking", Name: "沉木晒台", Icon: "🪜", Desc: "高级晒台 + 躲藏二合一。", Cost: 80, Category: "basking", Basking: true, Shelter: true},
 	}
 }
 
-// findDecorSpec O(n) 查表，类型有限不需要 map
+// findDecorSpec O(n) 查表,类型有限不需要 map
 func findDecorSpec(typ string) (DecorSpec, bool) {
 	for _, d := range decorCatalog() {
 		if d.Type == typ {
@@ -139,7 +149,7 @@ func findDecorSpec(typ string) (DecorSpec, bool) {
 	return DecorSpec{}, false
 }
 
-// summarizeDecorEffects 把当前缸里的 decor 聚合成总效果，
+// summarizeDecorEffects 把当前缸里的 decor 聚合成总效果,
 // 供 advancePlayerTanks/Turtles 使用。
 func summarizeDecorEffects(tankID string) (filterBoost float64, clarityBoost int, hasBasking, hasShelter bool) {
 	rows, err := db.Query("SELECT type FROM decor WHERE tank_id = ?", tankID)
@@ -209,13 +219,13 @@ type SpeciesInfo struct {
 	AdultSize       string `json:"adult_size"`       // 成年体型
 }
 
-// PokedexEntry 单条图鉴信息：基础龟种信息 + 玩家维度的解锁/拥有状态
+// PokedexEntry 单条图鉴信息:基础龟种信息 + 玩家维度的解锁/拥有状态
 type PokedexEntry struct {
 	Species     SpeciesInfo `json:"species"`
 	Unlocked    bool        `json:"unlocked"`
 	UnlockDay   int         `json:"unlock_day"`
 	OwnedCount  int         `json:"owned_count"`     // 当前在养的数量
-	HatchedCount int        `json:"hatched_count"`   // 历史上孵化出来的数量（粗略：当前 birth_day>1 的）
+	HatchedCount int        `json:"hatched_count"`   // 历史上孵化出来的数量(粗略:当前 birth_day>1 的)
 }
 
 // 全局数据库连接
@@ -346,15 +356,15 @@ func initDB(dataDir string) error {
 		return err
 	}
 
-	// 在线迁移：给老库补 unlocked_species.unlock_day 列
-	// ALTER TABLE ADD COLUMN 在 SQLite 里幂等性差，要先查 PRAGMA
+	// 在线迁移:给老库补 unlocked_species.unlock_day 列
+	// ALTER TABLE ADD COLUMN 在 SQLite 里幂等性差,要先查 PRAGMA
 	if !columnExists("unlocked_species", "unlock_day") {
 		db.Exec("ALTER TABLE unlocked_species ADD COLUMN unlock_day INTEGER DEFAULT 0")
 	}
 	return nil
 }
 
-// columnExists 检查表里是否已有某列，用于幂等迁移
+// columnExists 检查表里是否已有某列,用于幂等迁移
 func columnExists(table, column string) bool {
 	rows, err := db.Query(fmt.Sprintf("PRAGMA table_info(%s)", table))
 	if err != nil {
@@ -421,13 +431,13 @@ func getOrCreatePlayer(playerID string) (*GameState, error) {
 	player.UnlockedSpecies, _ = loadUnlockedSpecies(playerID)
 	player.Eggs, _ = loadEggs(playerID)
 
-	// 迁移补齐：新增成就在老存档里可能不存在，补上去。
+	// 迁移补齐:新增成就在老存档里可能不存在,补上去。
 	ensureAchievementsExist(playerID, &player)
 
 	return &player, nil
 }
 
-// ensureAchievementsExist 在老存档里补上后加的成就记录，以免玩家看不到。
+// ensureAchievementsExist 在老存档里补上后加的成就记录,以免玩家看不到。
 func ensureAchievementsExist(playerID string, player *GameState) {
 	defaults := []Achievement{
 		{ID: "ach_1", Name: "初来乍到", Description: "获得第一只乌龟"},
@@ -471,8 +481,8 @@ func initTurtles(playerID string) {
 	}
 
 	for _, t := range turtles {
-		db.Exec(`INSERT INTO turtles (id, player_id, species, name, gender, personality, 
-			vitality, appetite, skin, shell, intimacy, melanism, tank_id, hunger, cleanliness, mood) 
+		db.Exec(`INSERT INTO turtles (id, player_id, species, name, gender, personality,
+			vitality, appetite, skin, shell, intimacy, melanism, tank_id, hunger, cleanliness, mood)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			t.ID, playerID, t.Species, t.Name, t.Gender, t.Personality,
 			t.Health.Vitality, t.Health.Appetite, t.Health.Skin, t.Health.Shell,
@@ -499,8 +509,8 @@ func initTanks(playerID string) {
 	}
 
 	for _, t := range tanks {
-		db.Exec(`INSERT INTO tanks (id, player_id, type, name, water_level, temp_day, temp_night, 
-			has_uvb, has_filter, ph, ammonia, nitrite, clarity) 
+		db.Exec(`INSERT INTO tanks (id, player_id, type, name, water_level, temp_day, temp_night,
+			has_uvb, has_filter, ph, ammonia, nitrite, clarity)
 			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 			t.ID, playerID, t.Type, t.Name, t.WaterLevel, t.TempDay, t.TempNight,
 			boolToInt(t.HasUVB), boolToInt(t.HasFilter),
@@ -549,8 +559,8 @@ func initUnlockedSpecies(playerID string) {
 	}
 }
 
-// unlockSpeciesForPlayer 给玩家解锁某龟种，记录解锁日。
-// 已解锁则保留旧 unlock_day，不覆盖。
+// unlockSpeciesForPlayer 给玩家解锁某龟种,记录解锁日。
+// 已解锁则保留旧 unlock_day,不覆盖。
 func unlockSpeciesForPlayer(playerID, speciesID string, day int) {
 	db.Exec("INSERT OR IGNORE INTO unlocked_species (player_id, species_id, unlock_day) VALUES (?, ?, ?)",
 		playerID, speciesID, day)
@@ -579,7 +589,7 @@ func loadTurtles(playerID string) ([]Turtle, error) {
 
 // 加载龟缸
 func loadTanks(playerID string) ([]Tank, error) {
-	rows, err := db.Query(`SELECT id, type, name, water_level, temp_day, temp_night, 
+	rows, err := db.Query(`SELECT id, type, name, water_level, temp_day, temp_night,
 		has_uvb, has_filter, ph, ammonia, nitrite, clarity
 		FROM tanks WHERE player_id = ?`, playerID)
 	if err != nil {
@@ -720,7 +730,7 @@ func handleGetState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 为每只龟追加智能建议（最多 2 条高优先级），让玩家一打开游戏就知道该干什么
+	// 为每只龟追加智能建议(最多 2 条高优先级),让玩家一打开游戏就知道该干什么
 	for i := range state.Turtles {
 		t := &state.Turtles[i]
 		sp, _ := findSpecies(t.Species)
@@ -739,13 +749,13 @@ func handleGetState(w http.ResponseWriter, r *http.Request) {
 			}
 		}
 		t.Suggestions = buildTurtleSuggestions(*t, sp, tankMap)
-		// 限制最多 2 条，避免 state 膨胀
+		// 限制最多 2 条,避免 state 膨胀
 		if len(t.Suggestions) > 2 {
 			t.Suggestions = t.Suggestions[:2]
 		}
 	}
 
-	// 为每个龟缸追加最近 14 天水质历史，方便前端趋势展示
+	// 为每个龟缸追加最近 14 天水质历史,方便前端趋势展示
 	for i := range state.Tanks {
 		state.Tanks[i].WaterHistory = loadWaterHistory(state.Tanks[i].ID, 14)
 	}
@@ -765,18 +775,18 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 		req.PlayerID = "default"
 	}
 
-	// 验证背包里还有该食物，避免刷接口刷负数
+	// 验证背包里还有该食物,避免刷接口刷负数
 	var haveCount int
 	err := db.QueryRow("SELECT count FROM inventory WHERE id = ? AND player_id = ?", req.FoodID, req.PlayerID).Scan(&haveCount)
 	if err == sql.ErrNoRows || haveCount <= 0 {
-		http.Error(w, "该食物已用完，请到商店补货", http.StatusBadRequest)
+		http.Error(w, "该食物已用完,请到商店补货", http.StatusBadRequest)
 		return
 	} else if err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// 不同食物效果不同，记住买什么不仅仅是堆数量。
+	// 不同食物效果不同,记住买什么不仅仅是堆数量。
 	hungerDelta, intimacyDelta, vitalityDelta, moodDelta := foodEffect(req.FoodID)
 	db.Exec(`UPDATE turtles SET
 		hunger     = MIN(100, hunger + ?),
@@ -802,18 +812,18 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 }
 
 // foodEffect 返回指定食物 id 的四项加成 (hunger, intimacy, vitality, mood)
-// 跟 shopCatalog 里的描述保持一致，避免口说无凭。
+// 跟 shopCatalog 里的描述保持一致,避免口说无凭。
 func foodEffect(foodID string) (hunger, intimacy, vitality, mood int) {
 	switch foodID {
-	case "food_1": // 龟粮：主粮均衡
+	case "food_1": // 龟粮:主粮均衡
 		return 30, 2, 0, 1
-	case "food_2": // 红虫：亲密度极高
+	case "food_2": // 红虫:亲密度极高
 		return 22, 6, 1, 3
-	case "food_3": // 虾干：饱腹强、提甲
+	case "food_3": // 虾干:饱腹强、提甲
 		return 38, 1, 2, 0
-	case "food_4": // 小鱼苗：野性填充 + 活力
+	case "food_4": // 小鱼苗:野性填充 + 活力
 		return 40, 4, 5, 2
-	case "tool_2": // 维生素片：补充品，不填股
+	case "tool_2": // 维生素片:补充品,不填股
 		return 0, 1, 20, 4
 	default: // 未知食物走默认值
 		return 25, 2, 0, 0
@@ -831,7 +841,7 @@ func handleClean(w http.ResponseWriter, r *http.Request) {
 	if req.PlayerID == "" {
 		req.PlayerID = "default"
 	}
-	// 支持 turtle_id 自动解析所属 tank，提升 API 易用性
+	// 支持 turtle_id 自动解析所属 tank,提升 API 易用性
 	if req.TankID == "" && req.TurtleID != "" {
 		db.QueryRow("SELECT tank_id FROM turtles WHERE id = ? AND player_id = ?", req.TurtleID, req.PlayerID).Scan(&req.TankID)
 	}
@@ -893,25 +903,25 @@ func maintainTank(playerID, tankID, mode string) (map[string]interface{}, error)
 	message := ""
 	switch mode {
 	case "scoop_waste":
-		// 普通清理：免费但效果有限，适合日常点一下。
+		// 普通清理:免费但效果有限,适合日常点一下。
 		clarity = clampInt(clarity+18, 0, 100)
 		ammonia = roundFloat(clampFloat(ammonia*0.78, 0, 5), 2)
 		nitrite = roundFloat(clampFloat(nitrite*0.86, 0, 5), 2)
-		message = "已捞走残饵和粪便，清澈度小幅回升"
+		message = "已捞走残饵和粪便,清澈度小幅回升"
 	case "partial_change":
-		// 部分换水：低成本，把水质拉回安全区但不清零。
+		// 部分换水:低成本,把水质拉回安全区但不清零。
 		cost = 20
 		clarity = clampInt(clarity+35, 0, 100)
 		ammonia = roundFloat(clampFloat(ammonia*0.42, 0, 5), 2)
 		nitrite = roundFloat(clampFloat(nitrite*0.50, 0, 5), 2)
-		message = "完成 1/3 换水，水质明显好转"
+		message = "完成 1/3 换水,水质明显好转"
 	case "deep_clean":
-		// 深度清洁：保留旧 /api/clean 的一键重置语义，但加入经营成本。
+		// 深度清洁:保留旧 /api/clean 的一键重置语义,但加入经营成本。
 		cost = 60
 		clarity = 100
 		ammonia = 0
 		nitrite = 0
-		message = "深度清洁完成，龟缸恢复清爽"
+		message = "深度清洁完成,龟缸恢复清爽"
 	case "install_filter":
 		if hasFilter == 1 {
 			return nil, fmt.Errorf("这个龟缸已经有过滤器了")
@@ -921,7 +931,7 @@ func maintainTank(playerID, tankID, mode string) (map[string]interface{}, error)
 		clarity = clampInt(clarity+25, 0, 100)
 		ammonia = roundFloat(clampFloat(ammonia*0.70, 0, 5), 2)
 		nitrite = roundFloat(clampFloat(nitrite*0.78, 0, 5), 2)
-		message = "过滤器安装完成，之后水质恶化会变慢"
+		message = "过滤器安装完成,之后水质恶化会变慢"
 	default:
 		return nil, fmt.Errorf("unknown maintenance mode")
 	}
@@ -931,7 +941,7 @@ func maintainTank(playerID, tankID, mode string) (map[string]interface{}, error)
 		return nil, fmt.Errorf("player not found")
 	}
 	if coins < cost {
-		return nil, fmt.Errorf("龟币不足，还差 %d", cost-coins)
+		return nil, fmt.Errorf("龟币不足,还差 %d", cost-coins)
 	}
 
 	tx, err := db.Begin()
@@ -986,7 +996,7 @@ func handleInteract(w http.ResponseWriter, r *http.Request) {
 	case "play":
 		db.Exec("UPDATE turtles SET mood = MIN(100, mood + 8), hunger = MAX(0, hunger - 5) WHERE id = ?", req.TurtleID)
 	case "check":
-		// 检查健康状态，返回详细建议
+		// 检查健康状态,返回详细建议
 		var t Turtle
 		if err := db.QueryRow(`SELECT id, species, name, gender, birth_day, weight, personality,
 			hunger, cleanliness, mood, intimacy, vitality, appetite, skin, shell, tank_id
@@ -1042,7 +1052,7 @@ func handleAddDecor(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "unknown decor type: "+req.Decor.Type, http.StatusBadRequest)
 		return
 	}
-	// 检查越限购买（cost > 0 的类需要扣龟币）
+	// 检查越限购买(cost > 0 的类需要扣龟币)
 	if spec.Cost > 0 {
 		var coins int
 		if err := db.QueryRow("SELECT coins FROM players WHERE id = ?", req.PlayerID).Scan(&coins); err != nil {
@@ -1050,7 +1060,7 @@ func handleAddDecor(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if coins < spec.Cost {
-			http.Error(w, fmt.Sprintf("龟币不足，需要 %d", spec.Cost), http.StatusBadRequest)
+			http.Error(w, fmt.Sprintf("龟币不足,需要 %d", spec.Cost), http.StatusBadRequest)
 			return
 		}
 	}
@@ -1079,18 +1089,18 @@ func handleAddDecor(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 扣除 cost（如果有）
+	// 扣除 cost(如果有)
 	if spec.Cost > 0 {
 		db.Exec("UPDATE players SET coins = coins - ? WHERE id = ?", spec.Cost, req.PlayerID)
 	}
-	// 装上海绵同步点亮 has_filter（软过滤也算过滤）。拳头产品。
+	// 装上海绵同步点亮 has_filter(软过滤也算过滤)。拳头产品。
 	if req.Decor.Type == "sponge" {
 		db.Exec("UPDATE tanks SET has_filter = 1 WHERE id = ? AND player_id = ?", req.TankID, req.PlayerID)
 	}
 
-	// 第一次布景奖励：给一点龟币和成就反馈，让系统有正向循环。
+	// 第一次布景奖励:给一点龟币和成就反馈,让系统有正向循环。
 	db.Exec("UPDATE achievements SET unlocked = 1, unlock_day = (SELECT day FROM players WHERE id = ?) WHERE player_id = ? AND id = 'ach_4' AND unlocked = 0", req.PlayerID, req.PlayerID)
-	// 免费装饰品才送龟币，避免装备送贺雙获利
+	// 免费装饰品才送龟币,避免装备送贺雙获利
 	if spec.Cost == 0 {
 		db.Exec("UPDATE players SET coins = coins + 20 WHERE id = ?", req.PlayerID)
 	}
@@ -1148,7 +1158,7 @@ func handleAdvanceDay(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		PlayerID string `json:"player_id"`
 	}
-	// 允许空 body（curl / 调试友好）；只在 body 非空时严格解码。
+	// 允许空 body(curl / 调试友好);只在 body 非空时严格解码。
 	if r.Body != nil {
 		_ = json.NewDecoder(r.Body).Decode(&req)
 	}
@@ -1156,7 +1166,7 @@ func handleAdvanceDay(w http.ResponseWriter, r *http.Request) {
 		req.PlayerID = "default"
 	}
 
-	// 懒初始化：所有写 API 都走这一步，避免冷启动 + 直接调用就 player not found。
+	// 懒初始化:所有写 API 都走这一步,避免冷启动 + 直接调用就 player not found。
 	if _, err := getOrCreatePlayer(req.PlayerID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1177,8 +1187,8 @@ func handleAdvanceDay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// M5 水质时间系统：所有衰减都限定在当前玩家，避免多玩家互相污染。
-	// 龟越多、无过滤、水草少时水质恶化更快；清洁度低会继续拖累心情和健康。
+	// M5 水质时间系统:所有衰减都限定在当前玩家,避免多玩家互相污染。
+	// 龟越多、无过滤、水草少时水质恶化更快;清洁度低会继续拖累心情和健康。
 	if err := advancePlayerTanks(req.PlayerID); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -1188,17 +1198,17 @@ func handleAdvanceDay(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// M4 经济正循环：根据健康龟数发放日常龟币（健康/亲密度加成），
+	// M4 经济正循环:根据健康龟数发放日常龟币(健康/亲密度加成),
 	// 让玩家不会因为长时间挂机直接破产。
 	income, incomeBreakdown := computeDailyIncome(req.PlayerID)
 	if income > 0 {
 		db.Exec("UPDATE players SET coins = coins + ? WHERE id = ?", income, req.PlayerID)
 	}
 
-	// M5 季节性事件提示（不写库，只回传前端用作 toast/弹幕）。
+	// M5 季节性事件提示(不写库,只回传前端用作 toast/弹幕)。
 	seasonEvent := seasonalEvent(season, day, req.PlayerID)
 
-	// M5 繁殖系统：同缸异性高亲密产蛋，到期孵化。
+	// M5 繁殖系统:同缸异性高亲密产蛋,到期孵化。
 	neweggs, newhatches, breedMsgs := advanceBreeding(req.PlayerID, day, season)
 
 	w.Header().Set("Content-Type", "application/json")
@@ -1215,7 +1225,7 @@ func handleAdvanceDay(w http.ResponseWriter, r *http.Request) {
 }
 
 // computeDailyIncome 根据每只龟的健康/亲密度结算"萌宠收益"。
-// 设计目标：3-5 只健康龟 / 天 ≈ 30-80 龟币，长期可负担基础食物+维护。
+// 设计目标:3-5 只健康龟 / 天 ≈ 30-80 龟币,长期可负担基础食物+维护。
 func computeDailyIncome(playerID string) (int, []map[string]interface{}) {
 	rows, err := db.Query(`SELECT id, name, vitality, appetite, mood, intimacy FROM turtles WHERE player_id = ?`, playerID)
 	if err != nil {
@@ -1231,13 +1241,13 @@ func computeDailyIncome(playerID string) (int, []map[string]interface{}) {
 		if err := rows.Scan(&id, &name, &vit, &app, &mood, &intim); err != nil {
 			continue
 		}
-		// 基础 5；健康均值 80+ 加 4；心情 70+ 加 3；亲密度每 20 加 1（封顶 5）。
+		// 基础 5;健康均值 80+ 加 4;心情 70+ 加 3;亲密度每 20 加 1(封顶 5)。
 		coins := 5
 		healthAvg := (vit + app) / 2
 		if healthAvg >= 80 {
 			coins += 4
 		} else if healthAvg < 40 {
-			coins -= 2 // 病龟反而要花钱治疗（隐喻）
+			coins -= 2 // 病龟反而要花钱治疗(隐喻)
 		}
 		if mood >= 70 {
 			coins += 3
@@ -1260,32 +1270,32 @@ func computeDailyIncome(playerID string) (int, []map[string]interface{}) {
 	return total, breakdown
 }
 
-// seasonalEvent 给前端展示季节小事件，配合 M5 时间系统。
-// 不真改龟属性（避免和水质系统打架），但让玩家感受到节律。
+// seasonalEvent 给前端展示季节小事件,配合 M5 时间系统。
+// 不真改龟属性(避免和水质系统打架),但让玩家感受到节律。
 func seasonalEvent(season string, day int, playerID string) map[string]interface{} {
 	dayInSeason := day % 30
 	switch season {
 	case "spring":
 		if dayInSeason == 5 {
-			return map[string]interface{}{"type": "breeding_hint", "icon": "💕", "text": "春暖，龟们开始追逐求偶。同缸异性高亲密龟有机会产蛋。"}
+			return map[string]interface{}{"type": "breeding_hint", "icon": "💕", "text": "春暖,龟们开始追逐求偶。同缸异性高亲密龟有机会产蛋。"}
 		}
 	case "summer":
 		if dayInSeason == 5 {
-			return map[string]interface{}{"type": "heat_warning", "icon": "🔥", "text": "夏季高温，注意换水频率和遮阴"}
+			return map[string]interface{}{"type": "heat_warning", "icon": "🔥", "text": "夏季高温,注意换水频率和遮阴"}
 		}
 		if dayInSeason == 18 {
-			return map[string]interface{}{"type": "feast", "icon": "🍤", "text": "伏天龟食欲旺，多投喂可加速成长"}
+			return map[string]interface{}{"type": "feast", "icon": "🍤", "text": "伏天龟食欲旺,多投喂可加速成长"}
 		}
 	case "autumn":
 		if dayInSeason == 5 {
-			return map[string]interface{}{"type": "fatten", "icon": "🍂", "text": "秋季囤膘期，多喂红虫/小鱼储备脂肪"}
+			return map[string]interface{}{"type": "fatten", "icon": "🍂", "text": "秋季囤膘期,多喂红虫/小鱼储备脂肪"}
 		}
 	case "winter":
 		if dayInSeason == 2 {
-			return map[string]interface{}{"type": "hibernate_hint", "icon": "❄️", "text": "水温下降，龟将进入半冬眠（暂未实装详细系统）"}
+			return map[string]interface{}{"type": "hibernate_hint", "icon": "❄️", "text": "水温下降,龟将进入半冬眠(暂未实装详细系统)"}
 		}
 		if dayInSeason == 15 {
-			return map[string]interface{}{"type": "warm_check", "icon": "🛁", "text": "寒潮中，检查加热棒和过滤器是否在线"}
+			return map[string]interface{}{"type": "warm_check", "icon": "🛁", "text": "寒潮中,检查加热棒和过滤器是否在线"}
 		}
 	}
 	return nil
@@ -1325,7 +1335,7 @@ func advancePlayerTanks(playerID string) error {
 		db.QueryRow("SELECT COUNT(*) FROM turtles WHERE player_id = ? AND tank_id = ?", playerID, tank.ID).Scan(&turtleCount)
 		db.QueryRow("SELECT COUNT(*) FROM decor WHERE tank_id = ? AND type = 'plant'", tank.ID).Scan(&plantCount)
 
-		// M3 布景=机制：设备类布景对水质衰减的叠加补助。
+		// M3 布景=机制:设备类布景对水质衰减的叠加补助。
 		decorFilter, decorClarity, _, _ := summarizeDecorEffects(tank.ID)
 
 		bioLoad := 1.0 + float64(maxInt(0, turtleCount-1))*0.35
@@ -1347,7 +1357,7 @@ func advancePlayerTanks(playerID string) error {
 		if _, err := db.Exec("UPDATE tanks SET ammonia = ?, nitrite = ?, clarity = ? WHERE id = ?", ammonia, nitrite, clarity, tank.ID); err != nil {
 			return err
 		}
-		// 记录水质历史，前端 sparkline 用；只保留最近 14 天
+		// 记录水质历史,前端 sparkline 用;只保留最近 14 天
 		var curDay int
 		if err := db.QueryRow("SELECT day FROM players WHERE id = ?", playerID).Scan(&curDay); err == nil {
 			db.Exec(`INSERT OR REPLACE INTO water_history (tank_id, day, ammonia, nitrite, clarity) VALUES (?, ?, ?, ?, ?)`,
@@ -1376,7 +1386,7 @@ func loadWaterHistory(tankID string, lastN int) []map[string]interface{} {
 			"day": day, "ammonia": ammonia, "nitrite": nitrite, "clarity": clarity,
 		})
 	}
-	// 反转成时间升序，前端方便画
+	// 反转成时间升序,前端方便画
 	for i, j := 0, len(list)-1; i < j; i, j = i+1, j-1 {
 		list[i], list[j] = list[j], list[i]
 	}
@@ -1416,7 +1426,7 @@ func advancePlayerTurtles(playerID string) error {
 	}
 	rows.Close()
 
-	// 缓存每个缸的 decor 汇总，避免同一个缸多次查
+	// 缓存每个缸的 decor 汇总,避免同一个缸多次查
 	tankSummary := map[string]struct {
 		hasBasking bool
 		hasShelter bool
@@ -1444,13 +1454,13 @@ func advancePlayerTurtles(playerID string) error {
 			healthDrop = 2
 		}
 
-		// 饥饿衰减：连续饥饿（hunger 已为 0）每天额外损耗活力/食欲
+		// 饥饿衰减:连续饥饿(hunger 已为 0)每天额外损耗活力/食欲
 		starveDrop := 0
 		if turtle.Hunger <= 0 {
 			starveDrop = 2
 		}
 
-		// M3 布景效果：适合中/陕水位龟种的晒台反馈
+		// M3 布景效果:适合中/陕水位龟种的晒台反馈
 		summary := tankSummary[turtle.TankID]
 		sp, hasSp := findSpecies(turtle.Species)
 		if hasSp && summary.hasBasking && (sp.HabitatType == "middle" || sp.HabitatType == "land") {
@@ -1461,13 +1471,21 @@ func advancePlayerTurtles(playerID string) error {
 			moodDrop = maxInt(0, moodDrop-1)
 		}
 
+		// 长期饥饿还会损伤皮肤与壳况，让"饿"的后果更立体。
+		starveSkinShell := 0
+		if turtle.Hunger <= 0 {
+			starveSkinShell = 1
+		}
+
 		_, err := db.Exec(`UPDATE turtles SET
 			hunger = MAX(0, hunger - 10),
 			cleanliness = MAX(0, cleanliness - ?),
 			mood = MAX(0, mood - ?),
 			vitality = MAX(0, vitality - ? - ?),
-			appetite = MAX(0, appetite - ? - ?)
-			WHERE id = ? AND player_id = ?`, cleanDrop, moodDrop, healthDrop, starveDrop, healthDrop, starveDrop, turtle.ID, playerID)
+			appetite = MAX(0, appetite - ? - ?),
+			skin = MAX(0, skin - ? - ?),
+			shell = MAX(0, shell - ? - ?)
+			WHERE id = ? AND player_id = ?`, cleanDrop, moodDrop, healthDrop, starveDrop, healthDrop, starveDrop, healthDrop, starveSkinShell, healthDrop, starveSkinShell, turtle.ID, playerID)
 		if err != nil {
 			return err
 		}
@@ -1475,10 +1493,10 @@ func advancePlayerTurtles(playerID string) error {
 	return nil
 }
 
-// advanceBreeding 繁殖系统（M5）：
-// 1. 检查同缸异性成熟龟（出生≥20天），亲密度均≥40，按概率产蛋
-// 2. 推进已有蛋的孵化倒计时，到期则孵化为新龟并删除蛋记录
-// 3. 季节加成：春季产蛋概率 ×1.5
+// advanceBreeding 繁殖系统(M5):
+// 1. 检查同缸异性成熟龟(出生≥20天),亲密度均≥40,按概率产蛋
+// 2. 推进已有蛋的孵化倒计时,到期则孵化为新龟并删除蛋记录
+// 3. 季节加成:春季产蛋概率 ×1.5
 // 返回 (newEggsLaid, newTurtlesHatched, messages)
 func advanceBreeding(playerID string, day int, season string) (int, int, []string) {
 	var msgs []string
@@ -1541,7 +1559,7 @@ func advanceBreeding(playerID string, day int, season string) (int, int, []strin
 			continue
 		}
 
-		// 产蛋概率：基础 12%，亲密度加成，春季 ×1.5
+		// 产蛋概率:基础 12%,亲密度加成,春季 ×1.5
 		prob := 0.12
 		avgIntimacy := (mom.Intimacy + dad.Intimacy) / 2
 		prob += float64(avgIntimacy-40) * 0.003
@@ -1555,7 +1573,7 @@ func advanceBreeding(playerID string, day int, season string) (int, int, []strin
 			continue
 		}
 
-		// 子代种类 = 母方种类（简化遗传）
+		// 子代种类 = 母方种类(简化遗传)
 		eggID := fmt.Sprintf("egg_%d_%d", time.Now().UnixNano(), mrand.Intn(1000))
 		hatchAfter := 5 + mrand.Intn(4) // 5-8 天
 		hatchDay := day + hatchAfter
@@ -1570,7 +1588,7 @@ func advanceBreeding(playerID string, day int, season string) (int, int, []strin
 		if sp.ID != "" {
 			spName = sp.Name
 		}
-		msgs = append(msgs, fmt.Sprintf("🥚 %s 和 %s 产下了一枚%s蛋！预计 %d 天后孵化。",
+		msgs = append(msgs, fmt.Sprintf("🥚 %s 和 %s 产下了一枚%s蛋!预计 %d 天后孵化。",
 			mom.Name, dad.Name, spName, hatchAfter))
 		newEggs++
 	}
@@ -1607,11 +1625,11 @@ func advanceBreeding(playerID string, day int, season string) (int, int, []strin
 		db.Exec("DELETE FROM eggs WHERE id = ?", e.ID)
 
 		if mrand.Float64() > hatchProb {
-			msgs = append(msgs, "💔 一枚蛋没有孵化成功…")
+			msgs = append(msgs, "💔 一枚蛋没有孵化成功...")
 			continue
 		}
 
-		tID := fmt.Sprintf("turtle_%d_%d", time.Now().UnixNano(), mrand.Intn(1000))
+		tID := generateTurtleID()
 		sp, _ := findSpecies(e.Species)
 		name := "小宝宝"
 		if sp.ID != "" {
@@ -1637,14 +1655,14 @@ func advanceBreeding(playerID string, day int, season string) (int, int, []strin
 			personality, initVitality, initAppetite, initSkin, initShell,
 			10, 0, e.TankID, 70, 90, 80)
 
-		// 保险解锁图鉴：该龟种如果之前未解锁（理论上不会，但万一），补上解锁记录
+		// 保险解锁图鉴:该龟种如果之前未解锁(理论上不会,但万一),补上解锁记录
 		unlockSpeciesForPlayer(playerID, e.Species, day)
 
 		spName := e.Species
 		if sp.ID != "" {
 			spName = sp.Name
 		}
-		msgs = append(msgs, fmt.Sprintf("🐣 一只%s破壳而出！是%s的%s，性格%s。",
+		msgs = append(msgs, fmt.Sprintf("🐣 一只%s破壳而出!是%s的%s,性格%s。",
 			spName, gender, name, personality))
 		newHatches++
 	}
@@ -1700,28 +1718,28 @@ func speciesCatalog() []SpeciesInfo {
 	return []SpeciesInfo{
 		{ID: "muskTurtle", Name: "麝香龟", Category: "蛋龟", Difficulty: 1, Description: "体小、皮实、爱钻洞", UnlockCost: 0, HabitatType: "deep", UnlockCondition: "初始赠送",
 			ScientificName: "Sternotherus odoratus", NativeRegion: "北美东部", AdultSize: "10-13cm",
-			Trivia: "受惊会从腋窝腺体喷出麝香味液体，故名「臭味龟」(Stinkpot)。深水蛋龟一族，幼体在水下爬行而非游泳。"},
+			Trivia: "受惊会从腋窝腺体喷出麝香味液体,故名「臭味龟」(Stinkpot)。深水蛋龟一族,幼体在水下爬行而非游泳。"},
 		{ID: "razorbackTurtle", Name: "剃刀龟", Category: "蛋龟", Difficulty: 2, Description: "头大壳高、性格凶", UnlockCost: 500, HabitatType: "deep", UnlockCondition: "商店购买",
 			ScientificName: "Sternotherus carinatus", NativeRegion: "美国南部", AdultSize: "10-15cm",
-			Trivia: "背甲中央有明显高耸的脊棱，像剃刀刀刃。咬合力惊人，混养需谨慎。"},
+			Trivia: "背甲中央有明显高耸的脊棱,像剃刀刀刃。咬合力惊人,混养需谨慎。"},
 		{ID: "loggerheadMuskTurtle", Name: "果核泥龟", Category: "蛋龟", Difficulty: 2, Description: "黄色三道纹、温顺", UnlockCost: 600, HabitatType: "deep", UnlockCondition: "商店购买",
 			ScientificName: "Sternotherus minor", NativeRegion: "美国东南部", AdultSize: "7-12cm",
-			Trivia: "头部宽厚像「果核」，下颌有须状突起。幼体头侧三道金黄条纹是最大辨识特征。"},
+			Trivia: "头部宽厚像「果核」,下颌有须状突起。幼体头侧三道金黄条纹是最大辨识特征。"},
 		{ID: "chinesePondTurtle", Name: "中华草龟", Category: "水龟", Difficulty: 1, Description: "国民龟、墨化老头乐", UnlockCost: 0, HabitatType: "middle", UnlockCondition: "初始赠送",
 			ScientificName: "Mauremys reevesii", NativeRegion: "中国/朝鲜半岛/日本", AdultSize: "15-20cm",
-			Trivia: "成年公龟会全身墨化（黑化），俗称「墨龟/老头乐」。中国传统文化里长寿吉祥的代表。"},
+			Trivia: "成年公龟会全身墨化(黑化),俗称「墨龟/老头乐」。中国传统文化里长寿吉祥的代表。"},
 		{ID: "yellowPondTurtle", Name: "黄喉拟水龟", Category: "水龟", Difficulty: 2, Description: "大青/小青、活泼亲人", UnlockCost: 800, HabitatType: "middle", UnlockCondition: "商店购买",
 			ScientificName: "Mauremys mutica", NativeRegion: "中国南部/越南/日本", AdultSize: "15-22cm",
-			Trivia: "颈部黄色，两侧有黄白纵纹。按产地分大青(广东)和小青(越南)两个品系，宠物市场最热门。"},
+			Trivia: "颈部黄色,两侧有黄白纵纹。按产地分大青(广东)和小青(越南)两个品系,宠物市场最热门。"},
 		{ID: "chineseStripeTurtle", Name: "中华花龟", Category: "水龟", Difficulty: 2, Description: "颈纹密布、群居热闹", UnlockCost: 1000, HabitatType: "middle", UnlockCondition: "商店购买",
 			ScientificName: "Mauremys sinensis", NativeRegion: "中国南部/越南/台湾", AdultSize: "20-25cm",
-			Trivia: "头颈布满细密黄绿色纵纹，故又名「珍珠龟」。群居性强，多只混养更活跃。"},
-		{ID: "redEaredSlider", Name: "巴西龟", Category: "水龟", Difficulty: 1, Description: "入侵物种警示，请勿野放", UnlockCost: 300, HabitatType: "middle", UnlockCondition: "商店购买（带科普）",
+			Trivia: "头颈布满细密黄绿色纵纹,故又名「珍珠龟」。群居性强,多只混养更活跃。"},
+		{ID: "redEaredSlider", Name: "巴西龟", Category: "水龟", Difficulty: 1, Description: "入侵物种警示,请勿野放", UnlockCost: 300, HabitatType: "middle", UnlockCondition: "商店购买(带科普)",
 			ScientificName: "Trachemys scripta elegans", NativeRegion: "美国密西西比河流域", AdultSize: "20-30cm",
-			Trivia: "⚠️ 全球百大入侵物种。在中国南方野外繁殖已严重威胁本土水龟。养就养一辈子，绝不可野放。"},
+			Trivia: "⚠️ 全球百大入侵物种。在中国南方野外繁殖已严重威胁本土水龟。养就养一辈子,绝不可野放。"},
 		{ID: "yellowMarginTurtle", Name: "黄缘闭壳龟", Category: "半水龟", Difficulty: 4, Description: "国宝级、能闭壳、贵", UnlockCost: 2000, HabitatType: "land", UnlockCondition: "成就解锁",
 			ScientificName: "Cuora flavomarginata", NativeRegion: "中国大陆/台湾", AdultSize: "15-19cm",
-			Trivia: "背甲与腹甲之间有铰链，受惊可完全闭壳保护头尾。CITES 附录Ⅱ保护物种，繁殖代售合法但请认准来源。"},
+			Trivia: "背甲与腹甲之间有铰链,受惊可完全闭壳保护头尾。CITES 附录II保护物种,繁殖代售合法但请认准来源。"},
 	}
 }
 
@@ -1739,8 +1757,8 @@ func handleGetSpecies(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(speciesCatalog())
 }
 
-// handleGetPokedex 返回玩家维度的完整图鉴：所有龟种 + 是否解锁 + 解锁日 + 拥有数 + 孵化数
-// 未解锁仍会返回基本信息（名字/分类/难度/条件），但不返回 trivia、学名、产地、体型
+// handleGetPokedex 返回玩家维度的完整图鉴:所有龟种 + 是否解锁 + 解锁日 + 拥有数 + 孵化数
+// 未解锁仍会返回基本信息(名字/分类/难度/条件),但不返回 trivia、学名、产地、体型
 // 让玩家有「发现」的期待感。
 func handleGetPokedex(w http.ResponseWriter, r *http.Request) {
 	playerID := r.URL.Query().Get("player_id")
@@ -1798,7 +1816,7 @@ func handleGetPokedex(w http.ResponseWriter, r *http.Request) {
 			entry.Species.ScientificName = ""
 			entry.Species.NativeRegion = ""
 			entry.Species.AdultSize = ""
-			entry.Species.Description = "???"
+			entry.Species.Description = "这是一种神秘的龟类…继续探索以解锁详情。"
 		}
 		entries = append(entries, entry)
 	}
@@ -1819,33 +1837,33 @@ func handleGetPokedex(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleGetDecorCatalog 返回 M3 布景白名单，前端不再写死。
+// handleGetDecorCatalog 返回 M3 布景白名单,前端不再写死。
 func handleGetDecorCatalog(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(decorCatalog())
 }
 
 // ShopItemSpec 是商店里能买到的消耗品/工具。
-// 食物缺货是当前最痛的循环 gap：饥饿值会涨但买不到食物。这里补上。
+// 食物缺货是当前最痛的循环 gap:饥饿值会涨但买不到食物。这里补上。
 type ShopItemSpec struct {
 	ID       string `json:"id"`       // 同时也是 inventory 表里的 id
 	Type     string `json:"type"`     // food / tool
 	Name     string `json:"name"`
 	Icon     string `json:"icon"`
 	Desc     string `json:"desc"`
-	Cost     int    `json:"cost"`     // 单次购买价格（每次买 PackSize 个）
+	Cost     int    `json:"cost"`     // 单次购买价格(每次买 PackSize 个)
 	PackSize int    `json:"pack_size"`// 每次购买进背包多少个
 }
 
-// shopCatalog 全部走代码定义，跟 initInventory 的 id 复用，方便堆叠。
+// shopCatalog 全部走代码定义,跟 initInventory 的 id 复用,方便堆叠。
 func shopCatalog() []ShopItemSpec {
 	return []ShopItemSpec{
-		{ID: "food_1", Type: "food", Name: "龟粮", Icon: "🍖", Desc: "日常主粮，浮性颗粒。", Cost: 12, PackSize: 10},
-		{ID: "food_2", Type: "food", Name: "红虫", Icon: "🪱", Desc: "高蛋白零食，亲密度 +3。", Cost: 20, PackSize: 5},
-		{ID: "food_3", Type: "food", Name: "虾干", Icon: "🦐", Desc: "硬质零食，磨喙也磨爪。", Cost: 30, PackSize: 5},
-		{ID: "food_4", Type: "food", Name: "小鱼苗", Icon: "🐟", Desc: "野性十足，半水龟最爱。", Cost: 45, PackSize: 4},
+		{ID: "food_1", Type: "food", Name: "龟粮", Icon: "🍖", Desc: "日常主粮,浮性颗粒。", Cost: 12, PackSize: 10},
+		{ID: "food_2", Type: "food", Name: "红虫", Icon: "🪱", Desc: "高蛋白零食,亲密度 +3。", Cost: 20, PackSize: 5},
+		{ID: "food_3", Type: "food", Name: "虾干", Icon: "🦐", Desc: "硬质零食,磨喙也磨爪。", Cost: 30, PackSize: 5},
+		{ID: "food_4", Type: "food", Name: "小鱼苗", Icon: "🐟", Desc: "野性十足,半水龟最爱。", Cost: 45, PackSize: 4},
 		{ID: "tool_1", Type: "tool", Name: "水质测试剂", Icon: "🧪", Desc: "立刻刷新水质显示。", Cost: 25, PackSize: 3},
-		{ID: "tool_2", Type: "tool", Name: "维生素片", Icon: "💊", Desc: "活力 +20（喂食时随机生效）。", Cost: 35, PackSize: 2},
+		{ID: "tool_2", Type: "tool", Name: "维生素片", Icon: "💊", Desc: "活力 +20(喂食时随机生效)。", Cost: 35, PackSize: 2},
 	}
 }
 
@@ -1858,7 +1876,7 @@ func findShopItem(id string) (ShopItemSpec, bool) {
 	return ShopItemSpec{}, false
 }
 
-// handleGetShopCatalog 返回商店白名单 + 该玩家当前龟币，方便前端一次取齐。
+// handleGetShopCatalog 返回商店白名单 + 该玩家当前龟币,方便前端一次取齐。
 func handleGetShopCatalog(w http.ResponseWriter, r *http.Request) {
 	pid := r.URL.Query().Get("player_id")
 	if pid == "" {
@@ -1873,13 +1891,13 @@ func handleGetShopCatalog(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-// handleBuyItem 用龟币买消耗品。已存在则 count += pack_size，否则插入新行。
-// 一次只买一包；前端循环调用更直观。
+// handleBuyItem 用龟币买消耗品。已存在则 count += pack_size,否则插入新行。
+// 一次只买一包;前端循环调用更直观。
 func handleBuyItem(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		PlayerID string `json:"player_id"`
 		ItemID   string `json:"item_id"`
-		Quantity int    `json:"quantity"` // 买几包，默认 1
+		Quantity int    `json:"quantity"` // 买几包,默认 1
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		http.Error(w, "invalid json", http.StatusBadRequest)
@@ -1908,7 +1926,7 @@ func handleBuyItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if coins < totalCost {
-		http.Error(w, fmt.Sprintf("龟币不足，需要 %d，当前 %d", totalCost, coins), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("龟币不足,需要 %d,当前 %d", totalCost, coins), http.StatusBadRequest)
 		return
 	}
 
@@ -1918,7 +1936,7 @@ func handleBuyItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 入库：先查有没有同 id，有就 +count，没有就 insert
+	// 入库:先查有没有同 id,有就 +count,没有就 insert
 	var existing int
 	err := db.QueryRow("SELECT count FROM inventory WHERE id = ? AND player_id = ?", spec.ID, req.PlayerID).Scan(&existing)
 	if err == sql.ErrNoRows {
@@ -1931,7 +1949,7 @@ func handleBuyItem(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// 成就：破产边缘（首次商店购物）
+	// 成就:破产边缘(首次商店购物)
 	db.Exec(`UPDATE achievements SET unlocked = 1, unlock_day = (SELECT day FROM players WHERE id = ?)
 		WHERE player_id = ? AND id = 'ach_5' AND unlocked = 0`, req.PlayerID, req.PlayerID)
 
@@ -1967,7 +1985,7 @@ func handleBuySpecies(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if sp.UnlockCost == 0 {
-		http.Error(w, "初始龟种已赠送，无需购买", http.StatusBadRequest)
+		http.Error(w, "初始龟种已赠送,无需购买", http.StatusBadRequest)
 		return
 	}
 	if req.Name == "" {
@@ -2000,17 +2018,17 @@ func handleBuySpecies(w http.ResponseWriter, r *http.Request) {
 	db.QueryRow("SELECT day FROM players WHERE id = ?", req.PlayerID).Scan(&curDay)
 	unlockSpeciesForPlayer(req.PlayerID, req.SpeciesID, curDay)
 
-	// 创建新乌龟并自动入住匹配水位的龟缸，避免买完龟出现在“无家可归”状态。
-	turtleID := fmt.Sprintf("turtle_%d", time.Now().UnixNano())
+	// 创建新乌龟并自动入住匹配水位的龟缸,避免买完龟出现在"无家可归"状态。
+	turtleID := generateTurtleID()
 	gender := "♀"
-	if time.Now().UnixNano()%2 == 0 {
+	if mrand.Intn(2) == 0 {
 		gender = "♂"
 	}
-	if _, err := db.Exec(`INSERT INTO turtles (id, player_id, species, name, gender, personality, 
-		vitality, appetite, skin, shell, intimacy, melanism, tank_id, hunger, cleanliness, mood) 
+	if _, err := db.Exec(`INSERT INTO turtles (id, player_id, species, name, gender, personality,
+		vitality, appetite, skin, shell, intimacy, melanism, tank_id, hunger, cleanliness, mood)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		turtleID, req.PlayerID, req.SpeciesID, req.Name, gender, "好奇",
-		100, 100, 100, 100, 0, 0, tankID, 55, 85, 76); err != nil {
+		100, 100, 100, 100, 0, 0, tankID, 70, 90, 80); err != nil {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -2047,7 +2065,7 @@ func handleCreateTank(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if coins < cost {
-		http.Error(w, fmt.Sprintf("龟币不足，还差 %d", cost-coins), http.StatusBadRequest)
+		http.Error(w, fmt.Sprintf("龟币不足,还差 %d", cost-coins), http.StatusBadRequest)
 		return
 	}
 
@@ -2126,7 +2144,12 @@ func handleMoveTurtle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if sp, ok := findSpecies(species); ok && sp.HabitatType != waterLevel {
-		http.Error(w, fmt.Sprintf("%s更适合%s，不能搬到%s", sp.Name, waterLevelName(sp.HabitatType), waterLevelName(waterLevel)), http.StatusBadRequest)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		json.NewEncoder(w).Encode(map[string]string{
+			"status":  "error",
+			"message": fmt.Sprintf("%s更适合%s,不能搬到%s", sp.Name, waterLevelName(sp.HabitatType), waterLevelName(waterLevel)),
+		})
 		return
 	}
 	if oldTankID == req.TankID {
@@ -2221,7 +2244,7 @@ func findOrCreateTankForSpecies(playerID string, sp SpeciesInfo) (string, error)
 }
 
 // handleTurtleDetail GET /api/turtle?id=xxx&player_id=default
-// 返回某只龟的详细信息：基础属性 + 健康四维 + 龟种习性 + 当前缸水质 + 14日水质历史 + 智能建议。
+// 返回某只龟的详细信息:基础属性 + 健康四维 + 龟种习性 + 当前缸水质 + 14日水质历史 + 智能建议。
 func handleTurtleDetail(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	id := r.URL.Query().Get("id")
@@ -2291,7 +2314,7 @@ func handleTurtleDetail(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	// 智能建议（toast/UI 高亮的依据）
+	// 智能建议(toast/UI 高亮的依据)
 	suggestions := buildTurtleSuggestions(t, species, tank)
 
 	resp := map[string]interface{}{
@@ -2310,40 +2333,40 @@ func handleTurtleDetail(w http.ResponseWriter, r *http.Request) {
 func buildTurtleSuggestions(t Turtle, sp SpeciesInfo, tank map[string]interface{}) []map[string]interface{} {
 	var out []map[string]interface{}
 	if t.Hunger <= 30 {
-		out = append(out, map[string]interface{}{"level": "warn", "icon": "🍖", "text": fmt.Sprintf("%s 已经很饿了（饥饿度 %d），建议立刻喂食", t.Name, t.Hunger)})
+		out = append(out, map[string]interface{}{"level": "warn", "icon": "🍖", "text": fmt.Sprintf("%s 已经很饿了(饥饿度 %d),建议立刻喂食", t.Name, t.Hunger)})
 	} else if t.Hunger <= 55 {
-		out = append(out, map[string]interface{}{"level": "info", "icon": "🥗", "text": fmt.Sprintf("%s 有些饿了，可以补一顿", t.Name)})
+		out = append(out, map[string]interface{}{"level": "info", "icon": "🥗", "text": fmt.Sprintf("%s 有些饿了,可以补一顿", t.Name)})
 	}
 	if t.Cleanliness <= 40 {
-		out = append(out, map[string]interface{}{"level": "warn", "icon": "🛁", "text": "身上脏了，建议清洁或换水"})
+		out = append(out, map[string]interface{}{"level": "warn", "icon": "🛁", "text": "身上脏了,建议清洁或换水"})
 	} else if t.Cleanliness <= 60 {
-		out = append(out, map[string]interface{}{"level": "info", "icon": "🧼", "text": "清洁度一般，可顺手清理一下"})
+		out = append(out, map[string]interface{}{"level": "info", "icon": "🧼", "text": "清洁度一般,可顺手清理一下"})
 	}
 	if t.Mood <= 40 {
-		out = append(out, map[string]interface{}{"level": "warn", "icon": "👋", "text": "心情低落，多互动可提升亲密度"})
+		out = append(out, map[string]interface{}{"level": "warn", "icon": "👋", "text": "心情低落,多互动可提升亲密度"})
 	} else if t.Mood <= 55 {
-		out = append(out, map[string]interface{}{"level": "info", "icon": "🎈", "text": "心情一般，陪它玩玩吧"})
+		out = append(out, map[string]interface{}{"level": "info", "icon": "🎈", "text": "心情一般,陪它玩玩吧"})
 	}
 	if t.Health.Vitality <= 50 || t.Health.Appetite <= 50 {
-		out = append(out, map[string]interface{}{"level": "warn", "icon": "🩺", "text": "活力/食欲偏低，注意水质和环境温度"})
+		out = append(out, map[string]interface{}{"level": "warn", "icon": "🩺", "text": "活力/食欲偏低,注意水质和环境温度"})
 	}
 	if tank != nil {
 		if a, ok := tank["ammonia"].(float64); ok && a >= 1.0 {
-			out = append(out, map[string]interface{}{"level": "danger", "icon": "☠️", "text": fmt.Sprintf("NH₃ 已达 %.2f mg/L，强烈建议换水", a)})
+			out = append(out, map[string]interface{}{"level": "danger", "icon": "☠️", "text": fmt.Sprintf("NH3 已达 %.2f mg/L,强烈建议换水", a)})
 		}
 		if c, ok := tank["clarity"].(int); ok && c < 50 {
-			out = append(out, map[string]interface{}{"level": "warn", "icon": "💧", "text": "水体浑浊，建议深度清洁或开过滤"})
+			out = append(out, map[string]interface{}{"level": "warn", "icon": "💧", "text": "水体浑浊,建议深度清洁或开过滤"})
 		}
 		if hf, ok := tank["has_filter"].(bool); ok && !hf {
-			out = append(out, map[string]interface{}{"level": "info", "icon": "⚙️", "text": "当前缸未安装过滤器，可在维护菜单中安装"})
+			out = append(out, map[string]interface{}{"level": "info", "icon": "⚙️", "text": "当前缸未安装过滤器,可在维护菜单中安装"})
 		}
 		// 龟种 vs 缸水位匹配性
 		if wl, ok := tank["water_level"].(string); ok && sp.ID != "" && wl != sp.HabitatType && sp.HabitatType != "" {
-			out = append(out, map[string]interface{}{"level": "warn", "icon": "🏠", "text": fmt.Sprintf("%s 偏好「%s」缸，当前为「%s」，可考虑搬家", sp.Name, waterLevelName(sp.HabitatType), waterLevelName(wl))})
+			out = append(out, map[string]interface{}{"level": "warn", "icon": "🏠", "text": fmt.Sprintf("%s 偏好「%s」缸,当前为「%s」,可考虑搬家", sp.Name, waterLevelName(sp.HabitatType), waterLevelName(wl))})
 		}
 	}
 	if len(out) == 0 {
-		out = append(out, map[string]interface{}{"level": "ok", "icon": "✅", "text": "一切安好，享受佛系养龟时光吧"})
+		out = append(out, map[string]interface{}{"level": "ok", "icon": "✅", "text": "一切安好,享受佛系养龟时光吧"})
 	}
 	return out
 }
