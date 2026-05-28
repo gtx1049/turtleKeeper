@@ -11,6 +11,7 @@ let animationId;
 let lastTime = 0;
 let draggedDecorId = null;
 let dragDirty = false;
+let feedParticles = []; // 喂食掉落粒子
 
 // M1 素材预加载缓存
 const spriteCache = {};
@@ -330,6 +331,7 @@ function gameLoop(timestamp) {
     lastTime = timestamp;
     
     updateTurtles(dt);
+    updateParticles(dt);
     render();
     
     animationId = requestAnimationFrame(gameLoop);
@@ -359,6 +361,73 @@ function updateTurtles(dt) {
     });
 }
 
+// ===== 喂食粒子动画 =====
+function spawnFeedParticles(foodId) {
+    const food = (gameState.inventory || []).find(i => i.id === foodId);
+    const icon = food ? food.icon : '🟤';
+    const targetTurtle = turtles[0];
+    if (!targetTurtle) return;
+    const tx = targetTurtle.x;
+    for (let i = 0; i < 5; i++) {
+        feedParticles.push({
+            x: (tx + (Math.random() - 0.5) * 0.3),
+            y: -0.05,
+            vx: (Math.random() - 0.5) * 0.1,
+            vy: 0.3 + Math.random() * 0.2,
+            icon,
+            life: 1.2 + Math.random() * 0.4,
+            maxLife: 1.2 + Math.random() * 0.4,
+            splash: false,
+        });
+    }
+}
+
+function updateParticles(dt) {
+    for (let i = feedParticles.length - 1; i >= 0; i--) {
+        const p = feedParticles[i];
+        p.life -= dt;
+        if (p.life <= 0) {
+            feedParticles.splice(i, 1);
+            continue;
+        }
+        if (!p.splash) {
+            p.x += p.vx * dt;
+            p.vy += 0.6 * dt; // 重力
+            p.y += p.vy * dt;
+            // 落到水面（约 75% 高度）触发水花
+            if (p.y >= 0.72) {
+                p.y = 0.72;
+                p.splash = true;
+                p.vy = 0;
+                p.vx = 0;
+                p.life = Math.min(p.life, 0.5); // 水花只显示 0.5s
+            }
+        }
+    }
+}
+
+function drawParticles(w, h) {
+    feedParticles.forEach(p => {
+        if (!p.splash) {
+            // 食物下落
+            ctx.font = `${Math.round(18 + (p.life / p.maxLife) * 8)}px sans-serif`;
+            ctx.textAlign = 'center';
+            ctx.globalAlpha = Math.min(1, p.life * 2);
+            ctx.fillText(p.icon, p.x * w, p.y * h);
+            ctx.globalAlpha = 1;
+        } else {
+            // 水花涟漪
+            const progress = 1 - p.life / 0.5;
+            const radius = progress * 20;
+            ctx.beginPath();
+            ctx.arc(p.x * w, p.y * h, radius, 0, Math.PI * 2);
+            ctx.strokeStyle = `rgba(255,255,255,${0.6 * (1 - progress)})`;
+            ctx.lineWidth = 2;
+            ctx.stroke();
+        }
+    });
+}
+
 function render() {
     const w = canvas.width;
     const h = canvas.height;
@@ -377,6 +446,9 @@ function render() {
     
     // 绘制水面波纹
     drawRipples(w, h);
+    
+    // 绘制喂食粒子
+    drawParticles(w, h);
 }
 
 function drawWater(w, h) {
@@ -572,7 +644,11 @@ function drawDriftwoodBasking(ctx) {
 
 function drawTurtle(t, w, h) {
     const x = t.x * w;
-    const y = h * 0.6 + Math.sin(t.swimPhase) * 10;
+    // 限制龟的 Y 坐标不超过水质面板上边缘（面板约 56px + 标签预留 50px）
+    const panelHeight = 56;
+    const labelMargin = 50;
+    const maxY = Math.max(h * 0.35, h - panelHeight - labelMargin);
+    const y = Math.min(h * 0.6 + Math.sin(t.swimPhase) * 10, maxY);
     const dir = t.direction;
     const v = getTurtleVisual(t.species);
     // 幼龟渐进缩放：出生头 14 天 60% 大小，30 天后恢复正常，中间线性插值
@@ -596,7 +672,7 @@ function drawTurtle(t, w, h) {
     // M1 优先使用真实 PNG 素材，fallback 程序化绘制
     const spriteImg = spriteCache[t.species];
     if (spriteImg && spriteImg.complete && spriteImg.naturalWidth > 0) {
-        const s = px * 1.8; // 32px 素材在画布上的显示尺寸
+        const s = Math.max(40, px * 8); // 32px 素材放大到手机上可见
         ctx.drawImage(spriteImg, -s / 2, -s / 2, s, s);
     } else {
         drawPixelTurtleSprite(ctx, v, px, t.animFrame, t.blinkTimer);
@@ -834,6 +910,7 @@ async function feedTurtle(foodId) {
             showToast('喂食成功！');
             closeAllModals();
             await loadGameState();
+            spawnFeedParticles(foodId);
         } else {
             showToast('喂食失败');
         }

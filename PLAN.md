@@ -223,6 +223,216 @@ type Tank struct {
 
 <!-- AI_TESTER_LOG_START -->
 
+### 🐢 测试轮次 2026-05-28 07:46
+- **环境快照**：day=51, season=summer, coins=286, 龟数=4（小麝香♀、小草♂、新朋友♂、小巴西♀）
+- **与上轮对比**：上轮 day=44/coins=168/龟数=4；本轮推进 7 天，coins 因 income 26/天累计约 +182，clean 0 消耗，feed 用库存 food_1，净增 coins 至 286，无新增龟/蛋
+- **游玩动作**（10 步真实接口）：
+  1. `POST /api/feed`（turtle_1, food_1）→ ✅ hunger+30, intimacy+2, mood+1
+  2. `POST /api/feed`（turtle_2, food_1）→ ✅ 同上
+  3. `POST /api/feed`（turtle_1779853832205144140, food_1）→ ✅ 同上
+  4. `POST /api/feed`（turtle_ubauh3uh, food_1）→ ✅ 同上
+  5. `POST /api/interact`（turtle_1, pet）→ ✅ status=ok
+  6. `POST /api/interact`（turtle_1779853832205144140, pet）→ ✅ status=ok
+  7. `POST /api/clean`（tank_2）→ ✅ cost=0, message="水质良好,无需深度清洁"（上轮 P2 建议已落地）
+  8. `POST /api/advance-day` ×7（极端场景：连续推进 7 天）→ ✅ day=45~51 稳定，无 SQLITE_BUSY；income 26→24；day=48 触发 season_event `{"type":"feast","text":"伏天龟食欲旺,多投喂可加速成长"}`
+  9. `GET /api/breeding-hints` → ✅ 返回繁殖条件提示：`"繁殖需双方亲密度≥40"`，ready=false，male/female intimacy 均为 11（上轮 P2 建议已落地）
+  10. `GET /api/state` → ✅ 小草 vitality=37，跌破上轮关注的 40 临界值
+- **发现的 Bug**（按严重度 P0/P1/P2）：
+  - [P2] **小草 vitality=37 跌破 40，但未见"生病"状态触发**。state.turtles[] 中没有 sick/disease/status 字段，suggestions 仍是普通预警（"已经很饿了"）。若 40 是生病阈值，则机制未实现；若不是，则玩家不知道临界点在哪。期望：vitality<40 时 `status="sick"`，suggestions 增加"建议隔离/就医"，income 贡献减半。
+  - [P2] **后端日志仍无请求访问记录**。/tmp/tk.log 仅含 4 条启动日志（2026/05/27 11:47），进程已运行约 20h，期间无数请求未留下任何痕迹。期望：增加 middleware 或 `log.SetOutput(io.MultiWriter)` 将访问日志写入文件（3 行代码）。
+  - [P2] **外网连通性状态不明**。本轮浏览器不可用无法 snapshot，localhost:1517 正常但上轮 P1 端口漂移问题未确认修复。期望：下轮用 `curl 43.134.81.228:1517` 直接验证外网连通性。
+  - [P3] **advance-day 7 天后 income 降幅过轻**。4 只龟 hunger=0/cleanliness=8~35/mood=0，进入"濒死"状态，但 income 仅从 26→24（-7.7%）。经济惩罚几乎无感，与"养好龟=赚更多"的反馈链断裂。期望：income 与 health 四维平均值强挂钩，health<50 时收入接近 0。
+- **手感问题**（不是 bug，但影响体验）：
+  - breeding-hints 只返回有繁殖潜力的缸（tank_2），tank_1 单只小麝香无提示。逻辑合理，但玩家若只看 hints 可能忘记 tank_1 的龟无法繁殖。
+  - season_event feast 文案很棒，但触发后没有实际增益反馈。期望：feast 期间 feed 的 hunger_delta 从 30→40，或 advance-day 时 hunger 衰减减少。
+  - 小麝香 intimacy=50 远高于其他龟（10/11/11），interact 无每日上限/无衰减，长期加剧"只养一只龟"的边际效应。
+- **改进建议**（按性价比排序）：
+  - 🔥 高性价比：**补全"生病"状态**。vitality<40 时 `state.turtles[].status="sick"`，suggestions 增加"🩺 小草生病了，建议隔离治疗"，income 贡献降至 0 或 1。触发条件明确后玩家才有紧迫感。
+  - 🔥 高性价比：**后端日志落盘**。在 `main.go` 初始化时加 `log.SetOutput(io.MultiWriter(os.Stderr, logFile))`，将每个请求的 method/path/status 写入 `./data/tk.log`（3 行代码）。
+  - 一般：season_event 增加实际增益，如 feast 期间 feed 效率 +33%，让玩家感受到"季节真的在影响 gameplay"。
+  - 一般：interact 亲密度增加每日上限（每只龟每天最多 +5），防止单只龟垄断，鼓励雨露均沾。
+  - 一般：income 公式与 health 四维平均值强挂钩，health<60 时收入开始衰减，health<40 时接近 0，强化"养好龟=赚更多"的反馈链。
+- **下轮重点关注**：
+  - 小草 vitality<40 后是否会触发 sick 状态（再推进 3~5 天观察）
+  - SQLite 并发锁完全修复验证（尝试并发 4 个 feed）
+  - 外网 1517 连通性：`curl -sS -o /dev/null -w '%{http_code}' http://43.134.81.228:1517/`
+  - 后端日志：确认是否有新的日志文件生成（./data/ 下是否有 tk.log）
+
+---
+
+### 🐢 测试轮次 2026-05-28 02:46
+- **环境快照**：day=44, season=summer, coins=168, 龟数=4（小麝香♀、小草♂、新朋友♂、小巴西♀）
+- **与上轮对比**：上轮 day=41/coins=182/龟数=4；本轮推进 3 天，coins 因清洁 60 + 买食 12 等净支出降至 168，无新增龟/蛋
+- **游玩动作**（10 步真实接口）：
+  1. `POST /api/feed`（turtle_1, food_1）→ ✅ hunger+30, intimacy+2, mood+1
+  2. `POST /api/feed`（turtle_2, food_1）→ ✅ 同上
+  3. `POST /api/feed`（turtle_1779853832205144140, food_1）→ ✅ 同上
+  4. `POST /api/feed`（turtle_ubauh3uh, food_1）→ ❌ `database is locked (5) (SQLITE_BUSY)`；sleep 1s 后重试 → ✅ 成功
+  5. `POST /api/interact`（turtle_1, pet）→ ✅ status=ok
+  6. `POST /api/clean`（tank_2）→ ✅ deep_clean, cost=60, 水质归零（tank_2 此前 ammonia=1.58/clarity=29 极度恶化）
+  7. `POST /api/buy-item`（food_1×1）→ ✅ cost=12, gained=10，但返回 `coins=90` 与最终状态 168 不符（疑似并发读脏）
+  8. `POST /api/advance-day` → ✅ day=42, income=26
+  9. `POST /api/advance-day`（与上一步几乎并发）→ ❌ `database is locked (5) (SQLITE_BUSY)`；sleep 2s 重试 → ✅ day=43/44, income=26 稳定
+  10. `POST /api/move-turtle`（小巴西→tank_1）→ ✅ JSON error：`{"status":"error","message":"巴西龟更适合中水位缸,不能搬到深水缸"}`
+  11. `GET /api/shop-catalog` → ✅ 已修复上轮 P2：返回结构含完整 `species` 数组（8 种龟，含 habitat/unlock_cost 等）
+  12. `GET /api/pokedex` → ✅ 已修复上轮 P2：未解锁物种 description 改为 `"这是一种神秘的龟类…继续探索以解锁详情。"`，不再出现 `"???"`
+- **发现的 Bug**（按严重度 P0/P1/P2）：
+  - [P1] **SQLite `database is locked` 并发写冲突**。同时发送 2+ POST 请求（feed/advance-day/move-turtle）时，必现 `SQLITE_BUSY`。复现：并发 4 个 feed → 1 个失败；并发 2 个 advance-day → 1 个失败。期望：启用 WAL 模式，或在写操作层加 `sync.Mutex` 串行化，或改用 `busy_timeout` 让 SQLite 自动重试。
+  - [P1] **服务端口漂移：外网完全失联**。进程实际监听 `*:1518`（ss 确认），但代码默认/文档/外网地址均为 1517。`curl 43.134.81.228:1517` → HTTP 000。期望：统一 `PORT=1517` 环境变量，或防火墙做 1517→1518 转发，确保外网可访问。
+  - [P2] **后端访问日志未落地**。/tmp/tk.log 仅含 4 条启动日志，无请求访问记录。进程 stdout/stderr 重定向到 socket（由外部启动器接管），但 `journalctl` 无条目、`systemctl` 无服务。期望：将 `log.Printf` 输出同时写入 `/tmp/tk.log` 或 `./data/tk.log`，便于线上排查。
+  - [P2] **繁殖系统仍未触发**。day=44，tank_2 内同种异性（新朋友♂ + 小巴西♀）同缸多日，breed_messages 始终 null。intimacy 仅 4/7，远低于 plausible 阈值。玩家无进度提示，完全不知道需要做什么。期望：给出繁殖条件进度（如"亲密度 7/50、同缸天数 19/7"）。
+  - [P3] **buy-item 返回 coins 与全局状态不一致**。buy-item 返回 `"coins":90`，但随后 `/api/state` 显示 `coins=168`。疑似并发请求导致 handler 读到事务隔离级别下的脏数据。期望：确保 buy-item 在事务内完成扣费后再返回最终余额。
+- **手感问题**（不是 bug，但影响体验）：
+  - 4 只龟再次全部 hunger=0，cleanliness 和 mood 普遍偏低（小草 mood=0/cleanliness=20）。玩家断签 10h（上轮 16:46 → 本轮 02:46）后，所有龟进入"濒死"状态，对佛系定位略残酷。
+  - 小草 vitality=45，若再推 5~10 天无干预，可能跌破 40 进入"生病"状态。但目前未见生病机制触发。
+  - season 连续 44 天均为 spring/summer，无秋冬切换，季节系统仍像静态标签。
+  - income 在龟状态极差时仍有下限 26（4 龟合计），经济惩罚不够尖锐。
+- **改进建议**（按性价比排序）：
+  - 🔥 高性价比：**SQLite 并发写保护**。在 `main.go` 初始化时执行 `PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`，可大幅缓解并发锁（2 行代码）。
+  - 🔥 高性价比：**统一端口为 1517**。检查启动脚本/环境变量 `PORT`，确保外网可访问；若需保留 1518，则加 `iptables -t nat -A PREROUTING -p tcp --dport 1517 -j REDIRECT --to-port 1518`。
+  - 🔥 高性价比：**后端日志落盘**。在 `main.go` 加 `log.SetOutput(io.MultiWriter(os.Stderr, logFile))`，将访问日志写入 `./data/tk.log`（3 行代码）。
+  - 一般：繁殖系统给出条件提示，让玩家知道 intimacy/同缸天数门槛。
+  - 一般：长期 hunger=0 时加速 health 衰减（ vitality/appetite 每 2 天 -2，skin 每 5 天 -1），让"断签惩罚"更立体但不过分。
+  - 一般：季节切换增加倒计时或概率触发（如每 15 天强制换季），强化季节存在感。
+- **下轮重点关注**：
+  - SQLite 锁修复验证：并发 4 个 feed 是否不再报错
+  - 外网连通性：1517/1518 端口统一后 curl 外网是否通
+  - 小草生存线：再推进 5~10 天看 vitality 是否跌破 40，以及是否有"生病"状态触发
+  - 后端日志：确认是否有新的日志文件生成
+
+---
+
+### 🐢 测试轮次 2026-05-27 16:46
+- **环境快照**：day=41, season=summer, coins=182, 龟数=4（小麝香♀、小草♂、新朋友♂、小巴西♀）
+- **与上轮对比**：上轮 day=34/coins=365/龟数=3；本轮新增小巴西（turtle_ubauh3uh，字符串ID），coins 下降主要因清洁花费 120 + advance-day 收入波动
+- **游玩动作**（15 步真实接口）：
+  1. `POST /api/feed`（turtle_1, food_1）→ ✅ hunger+30, intimacy+2, mood+1
+  2. `POST /api/feed`（turtle_2, food_1）→ ✅ 同上
+  3. `POST /api/feed`（turtle_1779853832205144140, food_1）→ ✅ 大数字ID仍可正常操作
+  4. `POST /api/interact`（turtle_1, pet）→ ✅ status=ok
+  5. `POST /api/interact`（turtle_ubauh3uh, pet）→ ✅ status=ok
+  6. `POST /api/clean`（tank_1）→ ✅ deep_clean, cost=60, 水质归零
+  7. `POST /api/advance-day` → ✅ day=36, income=36, income_breakdown 明细清晰（4 龟分别 10/5/9/12）
+  8. `GET /api/turtle?id=turtle_ubauh3uh` → ✅ 字符串ID正常解析，返回完整档案+suggestions+water_history
+  9. `POST /api/move-turtle`（小巴西→tank_1）→ ✅ 返回 JSON error：`{"status":"error","message":"巴西龟更适合中水位缸,不能搬到深水缸"}` — **上轮 P1 bug 已修复**
+  10. `POST /api/add-decor`（tank_2, wood）→ ✅ 成功放置沉木
+  11. `POST /api/advance-day` ×5（极端场景：连续推进 5 天）→ day=37~41, income 33→33→29→25→25，无繁殖/季节事件
+  12. `POST /api/move-turtle`（小草→tank_1）→ ✅ JSON error（草龟不能进深水）
+  13. `POST /api/move-turtle`（小麝香→tank_2）→ ✅ JSON error（麝香不能进中水）
+  14. `POST /api/clean`（tank_1，连续清洁）→ ✅ cost=60，水质已是 100 仍扣费且无提示
+  15. `GET /api/shop-catalog` → ✅ 返回 6 种商品，但无 species 购买列表
+- **发现的 Bug**（按严重度 P0/P1/P2）：
+  - [P0] **上轮服务崩溃问题 → 已解决**。服务自 11:47 重启后稳定运行至今约 5h，HTTP 200 正常。
+  - [P1] **上轮 move-turtle 纯文本返回 → 已修复**。habitat 不匹配时现在返回标准 JSON error，前端可正常解析。
+  - [P1] **上轮大数字ID问题 → 部分修复**。新购龟 turtle_ubauh3uh 使用字符串ID，旧大数字ID turtle_1779853832205144140 仍可正常操作，后端兼容。
+  - [P2] **连续清洁无提示/无折扣**。clarity=100、ammonia=0 时再次清洁仍扣 60 龟币，无"已经很干净"提示。期望：水质良好时（clarity≥90 且 ammonia<0.3）返回 `{"status":"ok","message":"水质良好，无需深度清洁","cost":0}` 或类似提示。
+  - [P2] **shop-catalog 缺少 species 列表**。返回结构仅有 `items`（食物/工具），无龟种购买入口。前端若依赖 shop-catalog 展示全部购买项，会漏掉 `/api/buy-species` 功能。期望：追加 `species` 数组，含各龟种 id/name/price/unlock_condition。
+  - [P2] **繁殖系统仍无触发**。day=41，tank_2 内同种异性（新朋友♂ + 小巴西♀）同缸多日，但 breed_messages 始终 null。intimacy 过低（2 vs 5）可能是主因，但玩家完全不知道需要多少亲密度。期望：给出繁殖条件进度提示。
+  - [P2] **hunger 衰减偏快**。feed 后 hunger=50，连续 advance-day 5 天后全部归零（每天约 -10），意味着玩家必须每天至少登录喂一次，否则 5 天后所有龟饥饿=0、收入降至 25。对"佛系养龟"定位略苛刻。
+  - [P3] **后端日志缺失**。/tmp/tk.log 仅含启动日志，无请求访问日志，无法排查线上问题。
+- **手感问题**（不是 bug，但影响体验）：
+  - `income_breakdown` 明细很棒，玩家能直观看到每只龟的产币贡献。
+  - 小麝香 intimacy=34（远高于其他龟的 2~6），说明互动可无限累积且无衰减/上限，长期会形成"只养一只龟"的边际效应。
+  - 连续 41 天均为 spring/summer，无秋冬切换，季节系统存在感弱。
+  - 新龟小巴西初始 health=100，但 5 天未喂食后 hunger=0，没有"新龟保护期"缓冲。
+- **改进建议**（按性价比排序）：
+  - 🔥 高性价比：连续清洁时若 clarity≥90 且 ammonia<0.3，提示无需清洁并跳过扣费（1 行阈值判断）。
+  - 🔥 高性价比：`shop-catalog` 追加 `species` 数组，与 `buy-species` 接口对齐（数据结构已存在，只需聚合返回）。
+  - 🔥 高性价比：后端增加请求访问日志 middleware（每次请求打印 method/path/status/time，便于线上排查）。
+  - 一般：繁殖系统给出条件提示（如"亲密度 5/50、同缸天数 6/7"），让玩家知道还需做什么。
+  - 一般：调整 hunger 衰减速度——幼体/成体区分，或饥饿<30 时 advance-day 只减 5 而非 10，降低"断签"惩罚。
+  - 一般：增加季节事件触发频率或倒计时提示，强化季节系统存在感。
+- **下轮重点关注**：
+  - 繁殖系统：把 tank_2 的小巴西和新朋友亲密度刷到 20+ 后再推进，验证是否触发产蛋
+  - shop-catalog 的 species 列表修复
+  - 长期稳定性：验证服务能否持续 10h+ 不崩溃（当前已稳定 5h）
+  - 后端日志路径：确认是否有其他日志文件或需要开启 debug 模式
+
+---
+
+### 🐢 测试轮次 2026-05-27 11:46
+- **环境快照**：day=34, season=summer, coins=365, 龟数=3（小麝香♀、小草♂、巴西龟♂）
+- **游玩动作**：（列 13 个真实跑过的接口调用，含结果）
+  1. `curl localhost:1517/` → ❌ HTTP 000，服务已崩溃；手动 `./turtlekeeper` 重启后 → ✅ HTTP 200
+  2. `GET /api/state` → ✅ day=25, coins=483, 2 龟 2 缸，inventory 有 food_1×34 等
+  3. `POST /api/feed`（turtle_1, food_1）→ ✅ hunger+30, intimacy+2, mood+1, vitality_delta=0
+  4. `POST /api/feed`（turtle_2, food_1）→ ✅ 同上
+  5. `POST /api/interact`（turtle_1, pet）→ ✅ status=ok
+  6. `POST /api/clean`（tank_2）→ ✅ deep_clean, cost=60, 水质归零
+  7. `POST /api/buy-species`（redEaredSlider, 300 龟币）→ ✅ 新龟 turtle_1779853832205144140 入住 tank_2
+  8. `POST /api/advance-day` → ✅ day=26, income=27（新龟贡献 12），season=spring
+  9. `GET /api/turtle?id=turtle_1779853832205144140` → ⚠️ 返回合法 JSON 但 `jq` parse error（大数字 ID 或 UTF-8 截断）
+  10. `POST /api/advance-day` ×5 → day=27~31, season spring→summer(day=30), income 27→24 稳定
+  11. `POST /api/add-decor`（tank_1, wood）→ ✅ 成功放置沉木，decor id=decor_1779853869538246567
+  12. `POST /api/move-turtle`（巴西龟→tank_1）→ ⚠️ 返回纯文本 `"巴西龟更适合中水位缸，不能搬到深水缸"`（非 JSON）
+  13. `POST /api/advance-day` ×3（繁殖测试）→ day=32~34, income=24, breed_messages=null, new_eggs=0
+  14. `GET /api/pokedex` → ✅ 37% 完成度，3/8 解锁；未解锁物种 description="???"、trivia=""
+- **发现的 Bug**（按严重度 P0/P1/P2）：
+  - [P0] **服务在 cron 唤醒前已崩溃**。本轮开始时 curl 返回 HTTP 000，进程不存在。日志仅含启动信息无 panic，疑似被系统终止或 OOM。需加守护进程（systemd/nohup+循环）或查 `/var/log/syslog` 确认死因。
+  - [P1] `/api/move-turtle`  habitat 不匹配时返回**纯文本而非 JSON**。前端调用 `response.json()` 会直接抛异常，整条交互链路中断。复现：巴西龟（middle）→ tank_1（deep）→ 返回 `"巴西龟更适合中水位缸，不能搬到深水缸"`。期望：`{"status":"error","message":"巴西龟更适合中水位缸，不能搬到深水缸"}`。
+  - [P1] `/api/turtle?id=<大数字ID>` 导致 jq parse error。新买巴西龟的 turtle_id=`1779853832205144140`，该值超出 JavaScript 安全整数范围（2^53-1≈9e15），前端/工具解析时会失真或报错。期望：ID 统一用字符串 UUID（如 `"turtle_abc123"`）或缩短为 64 位字符串。
+  - [P2] 图鉴未解锁物种显示 `"???"` 和空字段。剃刀龟、果核泥龟等 description="???", trivia="", scientific_name=""，前端展示极其粗糙。期望：未解锁项给出模糊剪影文案，如 `"这是一种神秘的蛋龟…继续探索以解锁详情"`，而非三个问号。
+  - [P2] 新购龟初始 hunger=0。巴西龟刚买到手就显示"饥饿度 0 / 很饿了"，与"新生命活力满满"的直觉冲突。期望：新龟初始化 hunger=50~70，给玩家一个缓冲期。
+  - [P2] 繁殖系统未触发。day=34，同缸异性（小麝香♀ + 巴西龟♂ 曾同缸），intimacy 有差异（27 vs 0），但 breed_messages 始终 null。需确认繁殖条件：是否要求 intimacy≥50？是否要求同缸≥7 天？建议给玩家进度提示（如"亲密度不足，还需互动 X 次"）。
+- **手感问题**（不是 bug，但影响体验）：
+  - 小草的 health.vitality 从 77→65（10 天降 12），但 skin/shell 始终 100。长期饥饿只衰减活力/食欲，不影响皮肤/壳况，与真实养龟逻辑不符（饿久了会腐皮、软壳）。
+  - income 在 mood=0/cleanliness=0 时仍有下限 24（3 龟合计），缺乏"濒死惩罚"。小麝香 vitality=83 仍在产币 10，经济系统对负向状态的反馈不够尖锐。
+  - `add-decor` 成功后没有视觉/评分反馈。造景系统目前只是"放了东西"，缺少"生态友好度"评分或龟的互动反馈（如麝香龟钻沉木）。
+- **改进建议**（按性价比排序）：
+  - 🔥 高性价比：`move-turtle` 错误返回改为 JSON 格式（1 行 `json.NewEncoder(w).Encode` 替换 `fmt.Fprint`）。
+  - 🔥 高性价比：新龟初始化 hunger=60、cleanliness=80、mood=60，避免"刚买就濒死"。
+  - 🔥 高性价比：turtle ID 生成改用字符串 UUID（如 `uuid.New().String()` 或短 8 位随机），消除大整数溢出问题。
+  - 一般：图鉴未解锁项增加占位文案，避免 `"???"` 出现。
+  - 一般：长期 hunger=0 时，每 5 天 skin/shell -1，让"饿"的后果更立体。
+  - 一般：繁殖系统给出条件进度条（亲密度 X/100、同缸天数 Y/7），让玩家知道还需做什么。
+- **下轮重点关注**：
+  - 服务稳定性：加 systemd 守护或 nohup 循环，防止再次崩溃
+  - 大数字 ID 问题：验证前端是否能正常展示/操作新龟
+  - 繁殖系统：把两只龟 intimacy 都刷到 50+ 后再推进看是否触发产蛋
+  - 造景评分：add-decor 后是否有生态评分变化（目前 state 中 decor 仅返回 null 或列表，无评分字段）
+
+---
+
+### 🐢 测试轮次 2026-05-27 06:46
+- **环境快照**：day=21, season=spring, coins=591, 龟数=2（小麝香、小草）
+- **游玩动作**：
+  1. `POST /api/feed`（turtle_1, 无 player_id）→ ✅ 已修复上轮 bug，正常喂食，hunger+30, intimacy+2, mood+1
+  2. `POST /api/interact`（turtle_1, pet）→ ✅ status=ok
+  3. `POST /api/clean`（turtle_id）→ ❌ "tank_id required"；改传 tank_id 后 → ✅ deep_clean, cost=60, 水质归零
+  4. `POST /api/maintain-tank`（tank_1, partial_change）→ ✅ cost=20, ammonia 0.94→0.39
+  5. `POST /api/feed`（turtle_2）→ ✅ 同上
+  6. `POST /api/maintain-tank`（tank_2, partial_change）→ ✅ cost=20, ammonia 1.03→0.43
+  7. `POST /api/advance-day` → ✅ day=16, income=18（两只龟各 9）
+  8. `GET /api/turtle?id=turtle_1` → ✅ 返回完整档案 + suggestions（3 条预警）+ water_history（14 天记录）
+  9. `POST /api/buy-item`（food_1×1）→ ✅ cost=12, gained=10, coins=501
+  10. `POST /api/add-decor`（tank_1, decor_1）→ ❌ "tank_id and decor.type required"，参数命名与 catalog 不一致
+  11. `POST /api/advance-day` ×5 → day=17~21, income 恒为 18，无繁殖、无季节事件
+  12. `POST /api/clean`（tank_1, tank_id）→ ✅ deep_clean, cost=60
+- **发现的 Bug**（按严重度 P0/P1/P2）：
+  - [P1] `/api/feed` 返回字段 `vitality: 0` 语义不明。health.vitality 保持 100 未变，但接口返回了 0，前端若直接展示会造成玩家困惑（" vitality 归零？"）。期望：返回增量或移除该字段。
+  - [P2] `/api/clean` 参数设计反直觉。传入 turtle_id 被拒，要求 tank_id；但玩家思维是"给某只龟清洁"而非"给某个缸清洁"。建议：支持 turtle_id（自动找所属 tank）或改进错误提示为 "请传入 tank_id 或 turtle_id"。
+  - [P2] `/api/add-decor` 参数与 catalog 脱节。decor-catalog 返回 `type` 字段，但接口要求 `decor.type`（而非 `decor_id`），错误提示未说明有效值范围。建议：统一用 `decor_id` 或 `decor_type`，并在错误中给出可选值。
+  - [P2] 饥饿为 0 长期化后 health 衰减过慢。day=0→21，hunger 几乎恒为 0，但 vitality/appetite 仅从 100→97/89（约 3 天降 1 点），skin/shell 纹丝不动。真实逻辑：长期饥饿应更快损耗 vitality，并影响 skin（脱水/腐皮）。
+  - [P2] income 在 mood=0/cleanliness=0 时仍有下限 18。day=9 时降至 18 后便不再下降，龟处于"濒死"状态却稳定产币，经济系统缺乏惩罚深度。
+  - [P3] 部分 POST 响应在并发测试时偶发 jq parse error，但原始输出为合法 JSON，疑似响应头未正确设置 Content-Type 或尾部含不可见字符。
+- **手感问题**（不是 bug，但影响体验）：
+  - `water_history` 只在 `/api/turtle` 中返回，主状态 `/api/state` 没有，玩家换水后无法直观看到水质趋势。
+  - `suggestions` 仅存在于单龟详情页，state 中没有汇总预警，玩家需要逐只点进去才能看到"该喂食了"。
+  - decor catalog 中沉木/晒台石 cost=0，但 add-decor 接口门槛高（需 decor.type），容易让玩家误以为造景系统不可用。
+- **改进建议**（按性价比排序）：
+  - 🔥 高性价比：明确 `/api/feed` 返回值语义——若 vitality 是增量则 hunger=0 时应为 0（未实现衰减），直接移除更干净；若为当前值则与 health.vitality 不一致，属于数据 bug。
+  - 🔥 高性价比：`/api/clean` 支持 `turtle_id` 参数，自动解析到所属 tank，提升 API 易用性。
+  - 🔥 高性价比：在 `/api/state` 中给每只龟追加 `suggestions` 数组（最多 2 条高优先级），让玩家一打开游戏就知道该干什么。
+  - 一般：加速饥饿衰减逻辑——hunger=0 连续 3 天后，vitality/appetite 每天 -2，skin 每 5 天 -1，让"忘记喂食"有真实后果。
+  - 一般：income 下限改为与 health 四维平均值挂钩，health<80 时收入开始衰减，health<50 时接近 0，强化"养好龟=赚更多"的反馈。
+  - 一般：`/api/add-decor` 参数与 decor-catalog 字段对齐（`decor_type` 或 `type`），并在 400 错误中返回可用类型列表。
+- **下轮重点关注**：
+  - feed API 的 vitality 字段到底是 bug 还是设计如此
+  - 繁殖系统：把两只龟移到同缸后推进到 day≥30 看是否触发产蛋
+  - 长期挂机：再推进 10~15 天看 hunger=0 的龟是否会进入"生病"状态
+
+---
+
 ### 🐢 测试轮次 2026-05-27 01:46
 - **环境快照**：day=9, season=spring, coins=607, 龟数=2（小麝香、小草）
 - **游玩动作**：
