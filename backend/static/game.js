@@ -250,9 +250,11 @@ function updateTurtleList() {
         // M5 繁殖提示：同缸异性高亲密时显示心形徽章
         const bHint = getBreedingHintForTurtle(turtle.id);
         const breedBadge = bHint ? `<span class="breed-badge" title="${bHint.message}">${bHint.ready ? '💕' : '💔'}</span>` : '';
+        // sick 状态徽章
+        const sickBadge = turtle.status === 'sick' ? `<span class="sick-badge" title="生病了，建议隔离治疗">🩺</span>` : '';
         
         card.innerHTML = `
-            <div class="turtle-avatar">${getTurtleAvatarMarkup(turtle.species)}${breedBadge}</div>
+            <div class="turtle-avatar">${getTurtleAvatarMarkup(turtle.species)}${breedBadge}${sickBadge}</div>
             <div class="turtle-name">${turtle.name}</div>
             <div class="turtle-tank">${tank ? tank.name : '待分缸'}</div>
             <div class="turtle-hunger">
@@ -625,41 +627,96 @@ function drawDecor(w, h, waterLineY) {
 }
 
 function drawWood(ctx) {
-    ctx.fillStyle = '#8B4513';
+    // 底部阴影
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
     ctx.beginPath();
-    ctx.ellipse(0, 0, 30, 15, 0, 0, Math.PI * 2);
+    ctx.ellipse(2, 6, 32, 10, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#654321';
+    // 主干
+    ctx.fillStyle = '#7a3a0f';
     ctx.beginPath();
-    ctx.ellipse(0, -5, 25, 10, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, 32, 14, 0, 0, Math.PI * 2);
     ctx.fill();
+    // 纹理层
+    ctx.fillStyle = '#8B5A2B';
+    ctx.beginPath();
+    ctx.ellipse(0, -3, 26, 9, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 分枝结
+    ctx.fillStyle = '#5d3a1a';
+    ctx.beginPath();
+    ctx.ellipse(22, 2, 7, 4, 0.4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.ellipse(-20, -2, 5, 3, -0.3, 0, Math.PI * 2);
+    ctx.fill();
+    // 苔藓斑点
+    ctx.fillStyle = '#4a8a3a';
+    for (let i = 0; i < 3; i++) {
+        ctx.beginPath();
+        ctx.arc(-15 + i * 15, -4 + (i % 2) * 3, 2, 0, Math.PI * 2);
+        ctx.fill();
+    }
 }
 
 function drawStone(ctx) {
-    ctx.fillStyle = '#808080';
+    // 底部阴影
+    ctx.fillStyle = 'rgba(0,0,0,0.18)';
     ctx.beginPath();
-    ctx.ellipse(0, 0, 20, 15, 0, 0, Math.PI * 2);
+    ctx.ellipse(2, 5, 22, 10, 0, 0, Math.PI * 2);
     ctx.fill();
-    ctx.fillStyle = '#696969';
+    // 主体
+    ctx.fillStyle = '#7a7a7a';
     ctx.beginPath();
-    ctx.ellipse(-5, -3, 12, 10, 0, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, 22, 16, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // 高光
+    ctx.fillStyle = '#999999';
+    ctx.beginPath();
+    ctx.ellipse(-5, -4, 12, 8, -0.2, 0, Math.PI * 2);
+    ctx.fill();
+    // 裂纹
+    ctx.strokeStyle = '#555555';
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(-8, 2);
+    ctx.lineTo(2, 6);
+    ctx.lineTo(8, 0);
+    ctx.stroke();
+    // 苔藓
+    ctx.fillStyle = '#5a9a4a';
+    ctx.beginPath();
+    ctx.arc(-12, -6, 3, 0, Math.PI * 2);
     ctx.fill();
 }
 
 function drawPlant(ctx) {
-    ctx.strokeStyle = '#228B22';
-    ctx.lineWidth = 2;
+    const sway = Math.sin(Date.now() / 800) * 0.08; // 轻微摆动
+    ctx.strokeStyle = '#2a9a3a';
+    ctx.lineWidth = 2.5;
     for (let i = 0; i < 5; i++) {
-        const angle = -Math.PI / 2 + (i - 2) * 0.3;
+        const angle = -Math.PI / 2 + (i - 2) * 0.3 + sway * (i - 2);
         ctx.beginPath();
         ctx.moveTo(0, 0);
         ctx.quadraticCurveTo(
             Math.cos(angle) * 15,
-            Math.sin(angle) * 15 - 20,
-            Math.cos(angle) * 25,
-            Math.sin(angle) * 25 - 40
+            Math.sin(angle) * 15 - 22,
+            Math.cos(angle) * 28,
+            Math.sin(angle) * 28 - 46
         );
         ctx.stroke();
+        // 叶片
+        ctx.fillStyle = '#32a852';
+        ctx.beginPath();
+        ctx.ellipse(Math.cos(angle) * 28, Math.sin(angle) * 28 - 46, 4, 2, angle, 0, Math.PI * 2);
+        ctx.fill();
+    }
+    // 根部小丛
+    ctx.fillStyle = '#228B22';
+    for (let i = 0; i < 4; i++) {
+        ctx.beginPath();
+        ctx.arc(-8 + i * 5, 4, 2, 0, Math.PI * 2);
+        ctx.fill();
     }
 }
 
@@ -676,12 +733,22 @@ function drawSponge(ctx) {
         ctx.arc(x, y, 1.5, 0, Math.PI * 2);
         ctx.fill();
     }
-    // 顶部气泡进水嵼口、发出气法帕帕的过滤含义
-    ctx.fillStyle = '#5dade2';
-    for (let i = 0; i < 3; i++) {
+    // 顶部进水管
+    ctx.fillStyle = '#888';
+    ctx.fillRect(-4, -22, 8, 8);
+    // 气泡动画：更明显、更多
+    const t = Date.now() / 250;
+    ctx.fillStyle = 'rgba(173, 216, 230, 0.7)';
+    ctx.strokeStyle = 'rgba(255,255,255,0.5)';
+    ctx.lineWidth = 0.5;
+    for (let i = 0; i < 4; i++) {
+        const by = -22 - ((t + i * 1.7) % 5) * 5;
+        const bx = -6 + i * 4 + Math.sin(t + i) * 2;
+        const br = 1.5 + ((t + i) % 2) * 0.8;
         ctx.beginPath();
-        ctx.arc(-8 + i * 8, -18 - (Date.now() / 200 + i) % 6, 1.5, 0, Math.PI * 2);
+        ctx.arc(bx, by, br, 0, Math.PI * 2);
         ctx.fill();
+        ctx.stroke();
     }
 }
 
@@ -763,6 +830,17 @@ function drawTurtle(t, w, h, waterLineY) {
         ctx.drawImage(spriteImg, -s / 2, -s / 2, s, s);
     } else {
         drawPixelTurtleSprite(ctx, v, px, t.animFrame, t.blinkTimer);
+    }
+
+    // sick 状态视觉提示：灰色滤镜 + 顶部图标
+    if (t.status === 'sick') {
+        const sickSize = Math.max(40, px * 8);
+        ctx.fillStyle = 'rgba(80,80,90,0.35)';
+        ctx.fillRect(-sickSize/2 - 4, -sickSize/2 - 4, sickSize + 8, sickSize + 8);
+        ctx.font = 'bold 11px system-ui, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.fillStyle = '#ff4444';
+        ctx.fillText('🩺', 0, -sickSize/2 - 6);
     }
 
     // 名字小标签：多龟同缸时能快速分辨是哪只。

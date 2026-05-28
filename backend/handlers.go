@@ -2502,6 +2502,10 @@ func handleTurtleDetail(w http.ResponseWriter, r *http.Request) {
 // 用于详情面板顶部彩色提示 + 后续主界面按钮智能高亮。
 func buildTurtleSuggestions(t Turtle, sp SpeciesInfo, tank map[string]interface{}) []map[string]interface{} {
 	var out []map[string]interface{}
+	// AI_TESTER P2: sick 状态置顶提示
+	if t.Status == "sick" {
+		out = append(out, map[string]interface{}{"level": "danger", "icon": "🩺", "text": fmt.Sprintf("%s 生病了(vitality=%d)，建议隔离治疗、改善水质、补充营养", t.Name, t.Health.Vitality)})
+	}
 	if t.Hunger <= 30 {
 		out = append(out, map[string]interface{}{"level": "warn", "icon": "🍖", "text": fmt.Sprintf("%s 已经很饿了(饥饿度 %d),建议立刻喂食", t.Name, t.Hunger)})
 	} else if t.Hunger <= 55 {
