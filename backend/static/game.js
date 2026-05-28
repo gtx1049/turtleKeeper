@@ -12,6 +12,7 @@ let lastTime = 0;
 let draggedDecorId = null;
 let dragDirty = false;
 let feedParticles = []; // 喂食掉落粒子
+let breedingHints = []; // M5 繁殖提示缓存
 
 // M1 素材预加载缓存
 const spriteCache = {};
@@ -59,10 +60,28 @@ async function loadGameState() {
         
         updateUI();
         initTurtleRenderers();
+        await loadBreedingHints();
     } catch (e) {
         console.error('加载游戏状态失败:', e);
         showToast('加载失败，请刷新重试');
     }
+}
+
+async function loadBreedingHints() {
+    try {
+        const res = await fetch(`${API_BASE}/api/breeding-hints?player_id=default`);
+        const data = await res.json();
+        if (data.status === 'ok') {
+            breedingHints = data.hints || [];
+        }
+    } catch (e) {
+        console.warn('加载繁殖提示失败:', e);
+        breedingHints = [];
+    }
+}
+
+function getBreedingHintForTurtle(turtleId) {
+    return breedingHints.find(h => h.male.id === turtleId || h.female.id === turtleId);
 }
 
 function updateUI() {
@@ -228,8 +247,12 @@ function updateTurtleList() {
         if (hungerPercent < 30) hungerClass = 'low';
         else if (hungerPercent < 60) hungerClass = 'medium';
         
+        // M5 繁殖提示：同缸异性高亲密时显示心形徽章
+        const bHint = getBreedingHintForTurtle(turtle.id);
+        const breedBadge = bHint ? `<span class="breed-badge" title="${bHint.message}">${bHint.ready ? '💕' : '💔'}</span>` : '';
+        
         card.innerHTML = `
-            <div class="turtle-avatar">${getTurtleAvatarMarkup(turtle.species)}</div>
+            <div class="turtle-avatar">${getTurtleAvatarMarkup(turtle.species)}${breedBadge}</div>
             <div class="turtle-name">${turtle.name}</div>
             <div class="turtle-tank">${tank ? tank.name : '待分缸'}</div>
             <div class="turtle-hunger">
@@ -1337,7 +1360,18 @@ async function showEggsModal() {
     list.innerHTML = '';
 
     if (eggs.length === 0) {
-        list.innerHTML = '<div class="empty-state">暂无龟蛋。试试把同种异性龟放同缸，多互动提高亲密度，春季产蛋几率更高。</div>';
+        let emptyText = '暂无龟蛋。';
+        if (breedingHints.length > 0) {
+            emptyText += '<div class="breed-hints-list">';
+            breedingHints.forEach(h => {
+                const readyText = h.ready ? '💕 已就绪，推进天数有几率产蛋' : `💔 亲密度 ${h.male.intimacy}/${h.female.intimacy}（需双方≥40）`;
+                emptyText += `<div class="breed-hint-row"><b>${h.male.name}♂ + ${h.female.name}♀</b>：${readyText}</div>`;
+            });
+            emptyText += '</div>';
+        } else {
+            emptyText += '把同种异性龟放同缸，多互动提高亲密度，春季产蛋几率更高。';
+        }
+        list.innerHTML = `<div class="empty-state">${emptyText}</div>`;
     } else {
         const speciesMap = {};
         eggs.forEach(e => {
@@ -1515,6 +1549,20 @@ function renderTurtleDetail(data) {
             <span class="stat-num">${val}</span>
         </div>`;
     const h = t.health || {};
+    // M5 繁殖提示：若该龟在同缸有异性配对，显示进度
+    const bHint = getBreedingHintForTurtle(t.id);
+    let breedHtml = '';
+    if (bHint) {
+        const partnerName = bHint.male.id === t.id ? bHint.female.name : bHint.male.name;
+        const myIntimacy = bHint.male.id === t.id ? bHint.male.intimacy : bHint.female.intimacy;
+        const needIntimacy = Math.max(0, 40 - myIntimacy);
+        if (bHint.ready) {
+            breedHtml = `<div class="breed-hint ready"><span>💕</span> 与 ${partnerName} 繁殖就绪！推进天数有几率产蛋${bHint.season_bonus ? ' · 春季加成中' : ''}</div>`;
+        } else {
+            breedHtml = `<div class="breed-hint"><span>💔</span> 与 ${partnerName} 繁殖进度：亲密度 ${myIntimacy}/40（还需互动 ${needIntimacy} 次）${bHint.season_bonus ? ' · 春季加成中' : ''}</div>`;
+        }
+    }
+
     statsBox.innerHTML = `
         <div class="detail-meta">
             <div><b>性别</b> ${t.gender || '?'}</div>
@@ -1524,6 +1572,7 @@ function renderTurtleDetail(data) {
             <div><b>所在</b> ${tank ? tank.name + ' / ' + tank.water_name : '待分缸'}</div>
             <div><b>偏好</b> ${sp.habitat_type ? habitatName(sp.habitat_type) : '-'}</div>
         </div>
+        ${breedHtml}
         <div class="detail-bars">
             ${bar('饥饿度', t.hunger)}
             ${bar('清洁度', t.cleanliness)}

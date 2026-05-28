@@ -192,6 +192,8 @@ body {
 .turtle-avatar {
     font-size: 32px;
     line-height: 1;
+    position: relative;
+    display: inline-block;
 }
 
 .turtle-name {
@@ -1023,6 +1025,49 @@ body {
 .detail-meta b { color: #f0e6a8; margin-right: 4px; }
 
 .detail-bars { display: flex; flex-direction: column; gap: 4px; margin-bottom: 8px; }
+
+/* M5 繁殖提示 */
+.breed-hint {
+    background: #1e1528;
+    border-left: 3px solid #e94560;
+    padding: 8px 10px;
+    border-radius: 6px;
+    font-size: 12px;
+    color: #e8c4d4;
+    margin: 8px 0;
+    line-height: 1.5;
+}
+.breed-hint.ready {
+    background: #15281e;
+    border-left-color: #5fd17a;
+    color: #c4e8d4;
+}
+.breed-hint span { font-size: 14px; margin-right: 4px; }
+
+.breed-badge {
+    position: absolute;
+    top: -4px;
+    right: -4px;
+    font-size: 13px;
+    background: rgba(0,0,0,0.45);
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.breed-hints-list { margin-top: 8px; }
+.breed-hint-row {
+    background: rgba(255,255,255,0.06);
+    padding: 6px 8px;
+    border-radius: 6px;
+    margin: 4px 0;
+    font-size: 12px;
+    color: #cde;
+}
+.breed-hint-row b { color: #f0e6a8; }
 .stat-row {
     display: grid; grid-template-columns: 60px 1fr 40px; align-items: center; gap: 6px;
     font-size: 12px; color: #cfd;
