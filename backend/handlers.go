@@ -9,6 +9,7 @@ import (
 	mrand "math/rand"
 	_ "modernc.org/sqlite"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -53,21 +54,23 @@ type Egg struct {
 
 // Turtle 乌龟
 type Turtle struct {
-	ID          string                   `json:"id"`
-	Species     string                   `json:"species"`
-	Name        string                   `json:"name"`
-	Gender      string                   `json:"gender"`
-	BirthDay    int                      `json:"birth_day"`
-	Weight      float64                  `json:"weight"`
-	Personality string                   `json:"personality"`
-	Health      HealthStat               `json:"health"`
-	Intimacy    int                      `json:"intimacy"`
-	Melanism    int                      `json:"melanism"`
-	TankID      string                   `json:"tank_id"`
-	Hunger      int                      `json:"hunger"`
-	Cleanliness int                      `json:"cleanliness"`
-	Mood        int                      `json:"mood"`
-	Suggestions []map[string]interface{} `json:"suggestions,omitempty"`
+	ID             string                   `json:"id"`
+	Species        string                   `json:"species"`
+	Name           string                   `json:"name"`
+	Gender         string                   `json:"gender"`
+	BirthDay       int                      `json:"birth_day"`
+	Weight         float64                  `json:"weight"`
+	Personality    string                   `json:"personality"`
+	Health         HealthStat               `json:"health"`
+	Intimacy       int                      `json:"intimacy"`
+	Melanism       int                      `json:"melanism"`
+	TankID         string                   `json:"tank_id"`
+	Hunger         int                      `json:"hunger"`
+	Cleanliness    int                      `json:"cleanliness"`
+	Mood           int                      `json:"mood"`
+	Status         string                   `json:"status"`
+	LastInteractDay int                     `json:"last_interact_day"`
+	Suggestions    []map[string]interface{} `json:"suggestions,omitempty"`
 }
 
 // HealthStat 健康状态
@@ -232,6 +235,9 @@ type PokedexEntry struct {
 // 全局数据库连接
 var db *sql.DB
 
+// advance-day 串行化锁：缓解并发写冲突（AI_TESTER P1）
+var advanceDayMutex sync.Mutex
+
 // 初始化数据库
 func initDB(dataDir string) error {
 	var err error
@@ -244,7 +250,7 @@ func initDB(dataDir string) error {
 	if _, err := db.Exec("PRAGMA journal_mode=WAL;"); err != nil {
 		log.Printf("警告: 无法设置 WAL 模式: %v", err)
 	}
-	if _, err := db.Exec("PRAGMA busy_timeout=5000;"); err != nil {
+	if _, err := db.Exec("PRAGMA busy_timeout=10000;"); err != nil {
 		log.Printf("警告: 无法设置 busy_timeout: %v", err)
 	}
 
@@ -278,6 +284,8 @@ func initDB(dataDir string) error {
 		hunger INTEGER DEFAULT 50,
 		cleanliness INTEGER DEFAULT 80,
 		mood INTEGER DEFAULT 70,
+		status TEXT DEFAULT 'healthy',
+		last_interact_day INTEGER DEFAULT 0,
 		FOREIGN KEY (player_id) REFERENCES players(id)
 	);
 
@@ -369,6 +377,13 @@ func initDB(dataDir string) error {
 	// ALTER TABLE ADD COLUMN 在 SQLite 里幂等性差,要先查 PRAGMA
 	if !columnExists("unlocked_species", "unlock_day") {
 		db.Exec("ALTER TABLE unlocked_species ADD COLUMN unlock_day INTEGER DEFAULT 0")
+	}
+	// 在线迁移:给老库补 turtles.status / last_interact_day 列 (AI_TESTER P2)
+	if !columnExists("turtles", "status") {
+		db.Exec("ALTER TABLE turtles ADD COLUMN status TEXT DEFAULT 'healthy'")
+	}
+	if !columnExists("turtles", "last_interact_day") {
+		db.Exec("ALTER TABLE turtles ADD COLUMN last_interact_day INTEGER DEFAULT 0")
 	}
 	return nil
 }
@@ -578,7 +593,7 @@ func unlockSpeciesForPlayer(playerID, speciesID string, day int) {
 // 加载乌龟
 func loadTurtles(playerID string) ([]Turtle, error) {
 	rows, err := db.Query(`SELECT id, species, name, gender, birth_day, weight, personality,
-		vitality, appetite, skin, shell, intimacy, melanism, tank_id, hunger, cleanliness, mood
+		vitality, appetite, skin, shell, intimacy, melanism, tank_id, hunger, cleanliness, mood, status, last_interact_day
 		FROM turtles WHERE player_id = ?`, playerID)
 	if err != nil {
 		return nil, err
@@ -590,7 +605,7 @@ func loadTurtles(playerID string) ([]Turtle, error) {
 		var t Turtle
 		rows.Scan(&t.ID, &t.Species, &t.Name, &t.Gender, &t.BirthDay, &t.Weight, &t.Personality,
 			&t.Health.Vitality, &t.Health.Appetite, &t.Health.Skin, &t.Health.Shell,
-			&t.Intimacy, &t.Melanism, &t.TankID, &t.Hunger, &t.Cleanliness, &t.Mood)
+			&t.Intimacy, &t.Melanism, &t.TankID, &t.Hunger, &t.Cleanliness, &t.Mood, &t.Status, &t.LastInteractDay)
 		turtles = append(turtles, t)
 	}
 	return turtles, nil
@@ -1012,17 +1027,26 @@ func handleInteract(w http.ResponseWriter, r *http.Request) {
 
 	switch req.Action {
 	case "pet":
-		db.Exec("UPDATE turtles SET intimacy = MIN(100, intimacy + 5), mood = MIN(100, mood + 3) WHERE id = ?", req.TurtleID)
+		// AI_TESTER P2: 每只龟每天亲密增长上限 +5（即每天只能 pet 涨一次亲密）
+		var lastInteractDay, playerDay int
+		db.QueryRow("SELECT last_interact_day FROM turtles WHERE id = ?", req.TurtleID).Scan(&lastInteractDay)
+		db.QueryRow("SELECT day FROM players WHERE id = ?", req.PlayerID).Scan(&playerDay)
+		if lastInteractDay == playerDay {
+			// 今天已经互动过，只涨心情不涨亲密
+			db.Exec("UPDATE turtles SET mood = MIN(100, mood + 3) WHERE id = ?", req.TurtleID)
+		} else {
+			db.Exec("UPDATE turtles SET intimacy = MIN(100, intimacy + 5), mood = MIN(100, mood + 3), last_interact_day = ? WHERE id = ?", playerDay, req.TurtleID)
+		}
 	case "play":
 		db.Exec("UPDATE turtles SET mood = MIN(100, mood + 8), hunger = MAX(0, hunger - 5) WHERE id = ?", req.TurtleID)
 	case "check":
 		// 检查健康状态,返回详细建议
 		var t Turtle
 		if err := db.QueryRow(`SELECT id, species, name, gender, birth_day, weight, personality,
-			hunger, cleanliness, mood, intimacy, vitality, appetite, skin, shell, tank_id
+			hunger, cleanliness, mood, intimacy, vitality, appetite, skin, shell, tank_id, status, last_interact_day
 			FROM turtles WHERE id = ? AND player_id = ?`, req.TurtleID, req.PlayerID).
 			Scan(&t.ID, &t.Species, &t.Name, &t.Gender, &t.BirthDay, &t.Weight, &t.Personality,
-				&t.Hunger, &t.Cleanliness, &t.Mood, &t.Intimacy, &t.Health.Vitality, &t.Health.Appetite, &t.Health.Skin, &t.Health.Shell, &t.TankID); err != nil {
+				&t.Hunger, &t.Cleanliness, &t.Mood, &t.Intimacy, &t.Health.Vitality, &t.Health.Appetite, &t.Health.Skin, &t.Health.Shell, &t.TankID, &t.Status, &t.LastInteractDay); err != nil {
 			http.Error(w, "turtle not found", http.StatusNotFound)
 			return
 		}
@@ -1277,6 +1301,9 @@ func handleMoveDecor(w http.ResponseWriter, r *http.Request) {
 }
 
 func handleAdvanceDay(w http.ResponseWriter, r *http.Request) {
+	advanceDayMutex.Lock()
+	defer advanceDayMutex.Unlock()
+
 	var req struct {
 		PlayerID string `json:"player_id"`
 	}
@@ -1288,16 +1315,22 @@ func handleAdvanceDay(w http.ResponseWriter, r *http.Request) {
 		req.PlayerID = "default"
 	}
 
+	writeErr := func(code int, msg string) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(code)
+		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": msg})
+	}
+
 	// 懒初始化:所有写 API 都走这一步,避免冷启动 + 直接调用就 player not found。
 	if _, err := getOrCreatePlayer(req.PlayerID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	// 获取当前天数
 	var day int
 	if err := db.QueryRow("SELECT day FROM players WHERE id = ?", req.PlayerID).Scan(&day); err != nil {
-		http.Error(w, "player not found", http.StatusBadRequest)
+		writeErr(http.StatusBadRequest, "player not found")
 		return
 	}
 	day++
@@ -1305,18 +1338,18 @@ func handleAdvanceDay(w http.ResponseWriter, r *http.Request) {
 	// 更新天数和季节
 	season := getSeason(day)
 	if _, err := db.Exec("UPDATE players SET day = ?, season = ?, last_played = ? WHERE id = ?", day, season, time.Now().Unix(), req.PlayerID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	// M5 水质时间系统:所有衰减都限定在当前玩家,避免多玩家互相污染。
 	// 龟越多、无过滤、水草少时水质恶化更快;清洁度低会继续拖累心情和健康。
 	if err := advancePlayerTanks(req.PlayerID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(http.StatusInternalServerError, err.Error())
 		return
 	}
 	if err := advancePlayerTurtles(req.PlayerID); err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		writeErr(http.StatusInternalServerError, err.Error())
 		return
 	}
 
@@ -1349,7 +1382,8 @@ func handleAdvanceDay(w http.ResponseWriter, r *http.Request) {
 // computeDailyIncome 根据每只龟的健康/亲密度结算"萌宠收益"。
 // 设计目标:3-5 只健康龟 / 天 ≈ 30-80 龟币,长期可负担基础食物+维护。
 func computeDailyIncome(playerID string) (int, []map[string]interface{}) {
-	rows, err := db.Query(`SELECT id, name, vitality, appetite, mood, intimacy FROM turtles WHERE player_id = ?`, playerID)
+	// AI_TESTER P2: income 与 health 强挂钩，四维均值决定基础系数
+	rows, err := db.Query(`SELECT id, name, vitality, appetite, skin, shell, mood, intimacy FROM turtles WHERE player_id = ?`, playerID)
 	if err != nil {
 		return 0, nil
 	}
@@ -1359,18 +1393,12 @@ func computeDailyIncome(playerID string) (int, []map[string]interface{}) {
 	var breakdown []map[string]interface{}
 	for rows.Next() {
 		var id, name string
-		var vit, app, mood, intim int
-		if err := rows.Scan(&id, &name, &vit, &app, &mood, &intim); err != nil {
+		var vit, app, skin, shell, mood, intim int
+		if err := rows.Scan(&id, &name, &vit, &app, &skin, &shell, &mood, &intim); err != nil {
 			continue
 		}
-		// 基础 5;健康均值 80+ 加 4;心情 70+ 加 3;亲密度每 20 加 1(封顶 5)。
+		// 基础 5;心情 70+ 加 3;亲密度每 20 加 1(封顶 5)。
 		coins := 5
-		healthAvg := (vit + app) / 2
-		if healthAvg >= 80 {
-			coins += 4
-		} else if healthAvg < 40 {
-			coins -= 2 // 病龟反而要花钱治疗(隐喻)
-		}
 		if mood >= 70 {
 			coins += 3
 		}
@@ -1379,6 +1407,19 @@ func computeDailyIncome(playerID string) (int, []map[string]interface{}) {
 			intimBonus = 5
 		}
 		coins += intimBonus
+
+		// 健康四维均值决定收入系数: 健康养龟=赚更多
+		healthAvg := (vit + app + skin + shell) / 4
+		if healthAvg >= 80 {
+			coins += 4
+		} else if healthAvg >= 60 {
+			coins += 2
+		} else if healthAvg >= 40 {
+			coins += 0
+		} else {
+			coins -= 3 // 病龟反而要花钱治疗(隐喻)
+		}
+
 		if coins < 0 {
 			coins = 0
 		}
@@ -1387,6 +1428,7 @@ func computeDailyIncome(playerID string) (int, []map[string]interface{}) {
 			"turtle_id": id,
 			"name":      name,
 			"coins":     coins,
+			"health_avg": healthAvg,
 		})
 	}
 	return total, breakdown
@@ -1611,6 +1653,11 @@ func advancePlayerTurtles(playerID string) error {
 		if err != nil {
 			return err
 		}
+	}
+	// AI_TESTER P2: vitality<40 触发 sick 状态，否则恢复 healthy
+	_, err2 := db.Exec(`UPDATE turtles SET status = CASE WHEN vitality < 40 THEN 'sick' ELSE 'healthy' END WHERE player_id = ?`, playerID)
+	if err2 != nil {
+		return err2
 	}
 	return nil
 }

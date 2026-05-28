@@ -332,14 +332,23 @@ function selectTurtle(id) {
     }
 }
 
+// ============ 水位计算 ============
+function getWaterLineRatio() {
+    const tank = getCurrentTank();
+    if (!tank) return 0.10;
+    const levels = { deep: 0.10, middle: 0.32, shallow: 0.52, land: 0.68 };
+    return levels[tank.water_level] || 0.10;
+}
+
 // ============ 渲染系统 ============
 function initTurtleRenderers() {
+    const wl = getWaterLineRatio();
     turtles = gameState.turtles
         .filter(t => !currentTankId || !t.tank_id || t.tank_id === currentTankId)
         .map(t => ({
         ...t,
         x: Math.random() * 0.6 + 0.2,
-        y: 0.7,
+        y: wl + (1 - wl) * (0.35 + Math.random() * 0.4),
         vx: (Math.random() - 0.5) * 0.3,
         vy: 0,
         direction: Math.random() > 0.5 ? 1 : -1,
@@ -361,6 +370,7 @@ function gameLoop(timestamp) {
 }
 
 function updateTurtles(dt) {
+    const wl = getWaterLineRatio();
     turtles.forEach(t => {
         // 游泳动画
         t.swimPhase += dt * 2;
@@ -372,6 +382,11 @@ function updateTurtles(dt) {
         // 边界反弹
         if (t.x < 0.1) { t.x = 0.1; t.direction = 1; }
         if (t.x > 0.9) { t.x = 0.9; t.direction = -1; }
+        
+        // 垂直方向：限制在水面以下、水底以上
+        const amplitude = (1 - wl) * 0.18;
+        const baseY = wl + (1 - wl) * 0.5;
+        t.y = baseY + Math.sin(t.swimPhase) * amplitude;
         
         // 随机转向
         if (Math.random() < 0.005) {
@@ -454,52 +469,102 @@ function drawParticles(w, h) {
 function render() {
     const w = canvas.width;
     const h = canvas.height;
+    const wl = getWaterLineRatio();
+    const waterLineY = h * wl;
     
     ctx.clearRect(0, 0, w, h);
     
+    // 绘制缸壁/空气区域（水面以上）
+    drawAirZone(w, h, waterLineY);
+    
     // 绘制水面背景
-    drawWater(w, h);
-    drawWaterQualityOverlay(w, h);
+    drawWater(w, h, waterLineY);
+    drawWaterQualityOverlay(w, h, waterLineY);
     
     // 绘制造景
-    drawDecor(w, h);
+    drawDecor(w, h, waterLineY);
     
     // 绘制乌龟
-    turtles.forEach(t => drawTurtle(t, w, h));
+    turtles.forEach(t => drawTurtle(t, w, h, waterLineY));
     
-    // 绘制水面波纹
-    drawRipples(w, h);
+    // 绘制水面波纹线
+    drawWaterSurface(w, h, waterLineY);
+    
+    // 绘制气泡
+    drawRipples(w, h, waterLineY);
     
     // 绘制喂食粒子
-    drawParticles(w, h);
+    drawParticles(w, h, waterLineY);
 }
 
-function drawWater(w, h) {
-    // 水面渐变已在CSS中设置，这里可以加一些水下效果
-    // 绘制水底沙地
-    ctx.fillStyle = '#c4a35a';
-    ctx.fillRect(0, h * 0.85, w, h * 0.15);
+function drawAirZone(w, h, waterLineY) {
+    // 空气区域：半透明玻璃反光
+    const grad = ctx.createLinearGradient(0, 0, 0, waterLineY);
+    grad.addColorStop(0, 'rgba(200, 220, 240, 0.08)');
+    grad.addColorStop(1, 'rgba(180, 200, 230, 0.03)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, waterLineY);
     
-    // 沙地纹理：用确定性散点，避免每帧随机导致画面闪烁。
+    // 缸壁反光条
+    ctx.fillStyle = 'rgba(255,255,255,0.06)';
+    ctx.fillRect(w * 0.02, 4, 3, waterLineY - 8);
+    ctx.fillRect(w * 0.98, 4, 3, waterLineY - 8);
+}
+
+function drawWater(w, h, waterLineY) {
+    const waterH = h - waterLineY;
+    
+    // 水的主体渐变
+    const grad = ctx.createLinearGradient(0, waterLineY, 0, h);
+    grad.addColorStop(0, '#4a90d9');
+    grad.addColorStop(0.4, '#2d5a87');
+    grad.addColorStop(1, '#1a3a52');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, waterLineY, w, waterH);
+    
+    // 水底沙地
+    ctx.fillStyle = '#c4a35a';
+    ctx.fillRect(0, h - waterH * 0.15, w, waterH * 0.15);
+    
+    // 沙地纹理
     ctx.fillStyle = '#b8934a';
     for (let i = 0; i < 28; i++) {
         const x = ((i * 73) % 101) / 101 * w;
-        const y = h * 0.85 + (((i * 37) % 89) / 89) * h * 0.15;
+        const y = (h - waterH * 0.15) + (((i * 37) % 89) / 89) * waterH * 0.15;
         const r = 1 + (i % 3) * 0.8;
         ctx.beginPath();
         ctx.arc(x, y, r, 0, Math.PI * 2);
         ctx.fill();
     }
     
-    // 水面光效
-    const gradient = ctx.createLinearGradient(0, 0, 0, h * 0.3);
-    gradient.addColorStop(0, 'rgba(255,255,255,0.1)');
-    gradient.addColorStop(1, 'rgba(255,255,255,0)');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, w, h * 0.3);
+    // 水下光效（从上方照入）
+    const lightGrad = ctx.createLinearGradient(0, waterLineY, 0, waterLineY + waterH * 0.5);
+    lightGrad.addColorStop(0, 'rgba(255,255,255,0.08)');
+    lightGrad.addColorStop(1, 'rgba(255,255,255,0)');
+    ctx.fillStyle = lightGrad;
+    ctx.fillRect(0, waterLineY, w, waterH * 0.5);
 }
 
-function drawWaterQualityOverlay(w, h) {
+function drawWaterSurface(w, h, waterLineY) {
+    // 水面线：柔和波纹
+    ctx.strokeStyle = 'rgba(255,255,255,0.25)';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    const segments = 40;
+    for (let i = 0; i <= segments; i++) {
+        const x = (i / segments) * w;
+        const wave = Math.sin(i * 0.8 + Date.now() / 800) * 2;
+        if (i === 0) ctx.moveTo(x, waterLineY + wave);
+        else ctx.lineTo(x, waterLineY + wave);
+    }
+    ctx.stroke();
+    
+    // 水面高光条
+    ctx.fillStyle = 'rgba(255,255,255,0.12)';
+    ctx.fillRect(0, waterLineY - 1, w, 2);
+}
+
+function drawWaterQualityOverlay(w, h, waterLineY) {
     const tank = getCurrentTank();
     if (!tank || !tank.water_quality) return;
     const water = tank.water_quality;
@@ -509,22 +574,25 @@ function drawWaterQualityOverlay(w, h) {
     const murky = Math.max(0, Math.min(0.38, (100 - clarity) / 180 + ammonia * 0.045 + nitrite * 0.035));
     if (murky <= 0.02) return;
 
+    const waterH = h - waterLineY;
     ctx.fillStyle = `rgba(96, 74, 30, ${murky})`;
-    ctx.fillRect(0, 0, w, h);
+    ctx.fillRect(0, waterLineY, w, waterH);
     ctx.fillStyle = `rgba(244, 222, 150, ${murky * 0.65})`;
     for (let i = 0; i < 18; i++) {
         const x = ((i * 47 + Math.floor(Date.now() / 160)) % 101) / 101 * w;
-        const y = h * (0.18 + (((i * 29) % 79) / 79) * 0.68);
+        const y = waterLineY + (((i * 29) % 79) / 79) * waterH;
         ctx.beginPath();
         ctx.arc(x, y, 1.2 + (i % 4) * 0.7, 0, Math.PI * 2);
         ctx.fill();
     }
 }
 
-function drawDecor(w, h) {
+function drawDecor(w, h, waterLineY) {
     decor.forEach(d => {
         const x = d.x * w;
-        const y = d.y * h;
+        // 装饰限制在水面以下（稍微浸入水中更自然）
+        const minY = waterLineY + 8;
+        const y = Math.max(d.y * h, minY);
         
         ctx.save();
         ctx.translate(x, y);
@@ -665,13 +733,9 @@ function drawDriftwoodBasking(ctx) {
     }
 }
 
-function drawTurtle(t, w, h) {
+function drawTurtle(t, w, h, waterLineY) {
     const x = t.x * w;
-    // 限制龟的 Y 坐标不超过水质面板上边缘（面板约 56px + 标签预留 50px）
-    const panelHeight = 56;
-    const labelMargin = 50;
-    const maxY = Math.max(h * 0.35, h - panelHeight - labelMargin);
-    const y = Math.min(h * 0.6 + Math.sin(t.swimPhase) * 10, maxY);
+    const y = t.y * h;
     const dir = t.direction;
     const v = getTurtleVisual(t.species);
     // 幼龟渐进缩放：出生头 14 天 60% 大小，30 天后恢复正常，中间线性插值
@@ -807,12 +871,13 @@ function drawPixelTurtleSprite(ctx, v, px, animFrame, blinkTimer) {
         p(0, rowStart + 5, 1, 1, v.stripe);
     }
 }
-function drawRipples(w, h) {
-    // 简单的气泡效果
+function drawRipples(w, h, waterLineY) {
+    // 气泡效果：只在水下区域
+    const waterH = h - waterLineY;
     ctx.fillStyle = 'rgba(255,255,255,0.15)';
     for (let i = 0; i < 5; i++) {
         const bx = (Math.sin(Date.now() / 2000 + i * 1.5) * 0.5 + 0.5) * w;
-        const by = h * 0.3 + Math.sin(Date.now() / 1500 + i) * h * 0.2;
+        const by = waterLineY + waterH * 0.2 + Math.sin(Date.now() / 1500 + i) * waterH * 0.3;
         const br = 2 + Math.sin(Date.now() / 1000 + i) * 1;
         ctx.beginPath();
         ctx.arc(bx, by, br, 0, Math.PI * 2);

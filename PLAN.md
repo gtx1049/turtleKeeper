@@ -223,6 +223,47 @@ type Tank struct {
 
 <!-- AI_TESTER_LOG_START -->
 
+### 🐢 测试轮次 2026-05-28 17:50
+- **环境快照**：day=56, season=summer, coins≈286, 龟数=4（小麝香♀、小草♂、新朋友♂、小巴西♀）
+- **与上轮对比**：上轮 day=51/coins=286/龟数=4；本轮因测试消耗清洁60 + advance-day收入26×2，净变化微降；无新增龟/蛋
+- **游玩动作**（10+ 步真实接口）：
+  1. `POST /api/feed`（turtle_ubauh3uh, food_1, hunger=0 极端喂食）→ ✅ hunger+30, intimacy+2, mood+1
+  2. `POST /api/feed`（turtle_1779853832205144140, food_1, hunger=30）→ ✅ 同上
+  3. `POST /api/interact`（turtle_1, pet, intimacy=67 极端刷亲密）→ ✅ status=ok, intimacy→72
+  4. `POST /api/clean`（tank_1, cleanliness=17）→ ✅ cost=60, deep_clean, clarity=100
+  5. `POST /api/clean`（tank_2, clarity=90）→ ✅ cost=0, message="水质良好,无需深度清洁"（上轮建议已落地）
+  6. `POST /api/advance-day` → ✅ day=54, income=26, breed_messages=null
+  7. `POST /api/advance-day`（与上一步并发）→ ❌ `database is locked (5) (SQLITE_BUSY)`，日志记录 500
+  8. `GET /api/breeding-hints` → ✅ 新朋友♂(亲密20) + 小巴西♀(亲密13)，提示"繁殖需双方亲密度≥40"（上轮建议已落地）
+  9. 并发 feed ×4（SQLite 锁验证）→ ✅ 4 个全部 200，未触发锁（feed 持锁时间短）
+  10. `POST /api/advance-day`（单发）→ ✅ day=55→56, income=26
+  11. 并发 advance-day ×2（极端场景）→ ❌ 两个均返回 `database is locked`，日志均记录 500
+  12. `curl 43.134.81.228:1517/` → ✅ HTTP 200, t=2.3ms（上轮 P1 外网漂移已修复）
+- **发现的 Bug**（按严重度 P0/P1/P2）：
+  - [P1] **并发 advance-day 100% 触发 SQLITE_BUSY**。复现：同时发送 2 个 POST /api/advance-day → 两个均返回纯文本 `database is locked (5) (SQLITE_BUSY)`，后端日志记录 500。单发正常。advance-day 涉及全表龟状态更新+玩家状态写入，持锁时间长，并发必冲突。期望：启用 `PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;` 或在 advance-day 层加 `sync.Mutex` 串行化。
+  - [P2] **小草 vitality=37 连续两轮跌破 40，仍未触发 sick 状态**。state.turtles[] 中无 `status` 字段，suggestions 仅为普通预警（"有些饿了""清洁度一般"）。若 40 是生病阈值则机制未实现；若不是，玩家完全不知道临界点。期望：vitality<40 时 `status="sick"`，suggestions 增加"🩺 建议隔离治疗"，income 贡献降至 0。
+  - [P2] **interact 亲密度无每日上限**。小麝香 intimacy=67→72（本轮+5），远超其他龟的 13/14/22。长期单龟垄断，与"雨露均沾"养龟理念冲突。期望：每只龟每天 interact 亲密增长上限 +5，超出后 `status=ok` 但 intimacy_delta=0。
+  - [P2] **income 与 health 未强挂钩**。小草 vitality=37 仍产 3 币/天，小巴西 hunger=0 仍产 9 币/天，4 龟合计 26。经济惩罚几乎无感，"养好龟=赚更多"反馈链断裂。期望：income 与 health 四维平均值挂钩，health<50 时收入接近 0。
+  - [P3] **advance-day 500 错误返回纯文本而非 JSON**。前端 `response.json()` 会抛异常，无法优雅降级。期望：统一返回 `{"status":"error","message":"database is locked"}`。
+- **手感问题**（不是 bug，但影响体验）：
+  - season_event 连续多轮 null（day=48 之后未再触发），夏季已持续 56 天，季节系统像静态标签。
+  - 小麝香 intimacy=72 一家独大，其他龟几乎无互动价值，玩家缺乏"平衡养龟"的激励。
+  - 后端日志虽已落盘，但 500 错误仅记录状态码，无堆栈或详细上下文，排查仍困难。
+- **改进建议**（按性价比排序）：
+  - 🔥 高性价比：**SQLite WAL + busy_timeout**。在 `main.go` 初始化时执行 `PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000;`，可缓解 90% 并发锁（2 行代码）。
+  - 🔥 高性价比：**补全 sick 状态机制**。vitality<40 时 `state.turtles[].status="sick"`，suggestions 追加"🩺 生病了，建议隔离治疗"，income 贡献=0。触发后给玩家紧迫感，也是核心 gameplay。
+  - 🔥 高性价比：**interact 每日亲密上限**。`handleInteract` 中加判断：若今日已互动≥3 次则 intimacy_delta=0，防止单龟垄断（3 行代码）。
+  - 一般：advance-day 500 错误统一包装为 JSON error，前端可解析并提示"操作太频繁，请稍后再试"。
+  - 一般：income 公式与 health 四维均值挂钩，health<60 收入开始衰减，health<40 接近 0，强化反馈链。
+  - 一般：季节事件增加触发概率或倒计时（如每 7 天保底触发一次），避免长期 null。
+- **下轮重点关注**：
+  - SQLite 锁修复：并发 2 个 advance-day 是否不再报错
+  - sick 状态：小草 vitality<40 后是否触发
+  - interact 上限：单龟每日亲密增长是否被限制
+  - 后端 500 错误：是否返回标准 JSON 结构
+
+---
+
 ### 🐢 测试轮次 2026-05-28 07:46
 - **环境快照**：day=51, season=summer, coins=286, 龟数=4（小麝香♀、小草♂、新朋友♂、小巴西♀）
 - **与上轮对比**：上轮 day=44/coins=168/龟数=4；本轮推进 7 天，coins 因 income 26/天累计约 +182，clean 0 消耗，feed 用库存 food_1，净增 coins 至 286，无新增龟/蛋

@@ -69,12 +69,16 @@ body {
 
 /* 龟缸视图 */
 #tank-view {
-    flex: 1;
+    flex: none;
     position: relative;
-    background: linear-gradient(180deg, #87CEEB 0%, #4a90d9 30%, #2d5a87 60%, #1a3a52 100%);
-    margin: 8px;
+    aspect-ratio: 4 / 3;
+    max-height: 42vh;
+    width: calc(100% - 16px);
+    margin: 8px auto;
     border-radius: 12px;
     overflow: hidden;
+    border: 3px solid rgba(255,255,255,0.15);
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
 }
 
 #tank-canvas {
@@ -97,22 +101,19 @@ body {
 
 
 #water-panel {
-    position: absolute;
-    left: 8px;
-    right: 8px;
-    bottom: 8px;
     display: grid;
     grid-template-columns: 1.2fr repeat(4, 1fr);
     gap: 6px;
     align-items: center;
-    padding: 8px;
+    padding: 8px 12px;
+    margin: 0 8px 8px;
     border-radius: 12px;
-    background: rgba(3, 7, 18, 0.38);
+    background: rgba(3, 7, 18, 0.55);
     border: 1px solid rgba(255,255,255,0.12);
     backdrop-filter: blur(6px);
     color: #e0f2fe;
     font-size: 11px;
-    pointer-events: none;
+    flex-shrink: 0;
 }
 
 .water-panel-title {
