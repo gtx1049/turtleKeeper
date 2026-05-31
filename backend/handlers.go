@@ -1383,7 +1383,7 @@ func handleAdvanceDay(w http.ResponseWriter, r *http.Request) {
 // 设计目标:3-5 只健康龟 / 天 ≈ 30-80 龟币,长期可负担基础食物+维护。
 func computeDailyIncome(playerID string) (int, []map[string]interface{}) {
 	// AI_TESTER P2: income 与 health 强挂钩，四维均值决定基础系数
-	rows, err := db.Query(`SELECT id, name, vitality, appetite, skin, shell, mood, intimacy FROM turtles WHERE player_id = ?`, playerID)
+	rows, err := db.Query(`SELECT id, name, status, vitality, appetite, skin, shell, mood, intimacy FROM turtles WHERE player_id = ?`, playerID)
 	if err != nil {
 		return 0, nil
 	}
@@ -1392,11 +1392,27 @@ func computeDailyIncome(playerID string) (int, []map[string]interface{}) {
 	total := 0
 	var breakdown []map[string]interface{}
 	for rows.Next() {
-		var id, name string
+		var id, name, status string
 		var vit, app, skin, shell, mood, intim int
-		if err := rows.Scan(&id, &name, &vit, &app, &skin, &shell, &mood, &intim); err != nil {
+		if err := rows.Scan(&id, &name, &status, &vit, &app, &skin, &shell, &mood, &intim); err != nil {
 			continue
 		}
+
+		// 健康四维均值决定收入系数: 健康养龟=赚更多
+		healthAvg := (vit + app + skin + shell) / 4
+
+		// sick 龟不产生收入，强化治疗紧迫感
+		if status == "sick" {
+			breakdown = append(breakdown, map[string]interface{}{
+				"turtle_id":  id,
+				"name":       name,
+				"coins":      0,
+				"health_avg": healthAvg,
+				"reason":     "sick",
+			})
+			continue
+		}
+
 		// 基础 5;心情 70+ 加 3;亲密度每 20 加 1(封顶 5)。
 		coins := 5
 		if mood >= 70 {
@@ -1408,8 +1424,6 @@ func computeDailyIncome(playerID string) (int, []map[string]interface{}) {
 		}
 		coins += intimBonus
 
-		// 健康四维均值决定收入系数: 健康养龟=赚更多
-		healthAvg := (vit + app + skin + shell) / 4
 		if healthAvg >= 80 {
 			coins += 4
 		} else if healthAvg >= 60 {
@@ -1425,9 +1439,9 @@ func computeDailyIncome(playerID string) (int, []map[string]interface{}) {
 		}
 		total += coins
 		breakdown = append(breakdown, map[string]interface{}{
-			"turtle_id": id,
-			"name":      name,
-			"coins":     coins,
+			"turtle_id":  id,
+			"name":       name,
+			"coins":      coins,
 			"health_avg": healthAvg,
 		})
 	}
@@ -2430,11 +2444,11 @@ func handleTurtleDetail(w http.ResponseWriter, r *http.Request) {
 	var t Turtle
 	err := db.QueryRow(`SELECT id, species, name, gender, birth_day, weight, personality,
 		vitality, appetite, skin, shell, intimacy, melanism,
-		COALESCE(tank_id, ''), hunger, cleanliness, mood
+		COALESCE(tank_id, ''), hunger, cleanliness, mood, status, last_interact_day
 		FROM turtles WHERE id = ? AND player_id = ?`, id, playerID).Scan(
 		&t.ID, &t.Species, &t.Name, &t.Gender, &t.BirthDay, &t.Weight, &t.Personality,
 		&t.Health.Vitality, &t.Health.Appetite, &t.Health.Skin, &t.Health.Shell,
-		&t.Intimacy, &t.Melanism, &t.TankID, &t.Hunger, &t.Cleanliness, &t.Mood,
+		&t.Intimacy, &t.Melanism, &t.TankID, &t.Hunger, &t.Cleanliness, &t.Mood, &t.Status, &t.LastInteractDay,
 	)
 	if err != nil {
 		http.Error(w, "turtle not found", http.StatusNotFound)

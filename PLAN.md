@@ -223,6 +223,110 @@ type Tank struct {
 
 <!-- AI_TESTER_LOG_START -->
 
+### 🐢 测试轮次 2026-06-01 01:50
+- **环境快照**：day=69, season=autumn, coins=551, 龟数=4（小麝香♀intimacy=100、小草♂sick、新朋友♂、小巴西♀）
+- **与上轮对比**：上轮 day=66/coins=464/龟数=4/season=autumn；本轮服务此前**已离线约 2.5 天**（5/29 03:50 → 6/1 01:50），数据完全停滞，手动重启后才恢复。day 仅因本轮测试推进 +3（66→69），coins +87（测试 income 29×3）。
+- **游玩动作**（10+ 步真实接口）：
+  1. `curl localhost:1517/` → ❌ HTTP 000，进程不存在；手动 `./turtlekeeper` 重启后 → ✅ HTTP 200
+  2. `GET /api/state` → ✅ day=66, coins=464, season=autumn（与上轮完全一致，证实 2.5 天无变化）
+  3. `POST /api/feed`（turtle_1, food_1, hunger=0 极端喂食）→ ✅ hunger+30, intimacy+2, mood+1
+  4. `POST /api/feed`（turtle_1779853832205144140, food_1, hunger=30）→ ✅ hunger+30, intimacy+2, mood+1
+  5. `POST /api/feed`（turtle_ubauh3uh, food_1, hunger=10）→ ✅ hunger+30, intimacy+2, mood+1
+  6. `POST /api/interact`（turtle_1, pet, intimacy=99）→ ✅ status=ok
+  7. `POST /api/interact`（turtle_1, pet, 第2次）→ ✅ status=ok
+  8. `POST /api/interact`（turtle_1, pet, 第3次）→ ✅ status=ok
+  9. `POST /api/interact`（turtle_1, pet, 第4次）→ ✅ status=ok（intimacy 最终=100，总上限生效但**每日上限仍未限制**）
+  10. `POST /api/clean`（tank_2, ammonia=0.26/clarity=100）→ ✅ cost=0, message="水质良好,无需深度清洁"（上轮建议已落地）
+  11. `POST /api/advance-day` → ✅ day=67, income=29, 小草 income=0 reason="sick"（**上轮 sick=income=0 建议已落地**）
+  12. `GET /api/breeding-hints` → ✅ 新朋友♂(亲密26) + 小巴西♀(亲密19)，提示"繁殖需双方亲密度≥40"
+  13. `GET /api/turtle?id=turtle_2` → ✅ 返回 `status="sick"`，与 `/api/state` **一致**（上轮 P2 已修复）
+  14. `GET /api/shop-catalog` → ✅ species 数组完整（8 种龟，含 habitat/unlock_cost/trivia）
+  15. **并发 advance-day ×2**（SQLite 锁极端测试）→ ✅ 两个均返回 200！day=67→69，无 SQLITE_BUSY
+  16. `curl 43.134.81.228:1517/` → ✅ HTTP 200, t=2.1ms
+- **发现的 Bug**（按严重度 P0/P1/P2）：
+  - **[P0] 服务离线约 2.5 天，无守护进程自动恢复**。复现：5/29 03:50 之后服务进程消失，直至本轮手动重启前 `curl localhost:1517/` 均返回 HTTP 000。后端日志 `/tmp/tk.log` 无 panic 记录，5/29 之后无任何访问日志，推测为被动终止（OOM 或被 kill）。期望：加 `systemd` 服务或 `nohup+while true` 循环守护，确保崩溃后自动重启。
+  - [P1] **`interact` 每日亲密上限仍未实现**。小麝香当日 interact 4 次（此前 last_interact_day=63，today=66，时隔多日但仍在同日测试窗口内），intimacy 从 99→100。虽然存在总上限100，但玩家仍可在单日内无限次 interact 直至刷满。期望：`handleInteract` 中加判断，若 `last_interact_day == today && interact_count_today >= 3` 则 intimacy_delta=0。
+  - [P2] **并发 advance-day 时两个请求都成功，day 推进了 2 天**。虽然无 SQLITE_BUSY，但玩家快速双击/并发调用会导致意外推进 2 天。期望：同 player 5 秒内 advance-day 防抖，或返回 `"操作太频繁"`。
+  - [P2] **秋季 season_event 持续 null**。day=66~69 连续无事件， autumn 自 day=65 后未再触发 `fatten`，季节存在感短暂。期望：每季节至少保底触发 1 次事件，或增加倒计时提示。
+  - [P3] **小麝香 hunger 再次归零**。feed 后 advance-day 一次即 hunger=0，每日喂食压力对"佛系养龟"定位仍偏严苛。尤其 combined with 2.5 天离线，若真实玩家在此期间登录会面临"全龟濒死"的挫败感。
+- **已修复确认（上轮建议落地）**：
+  - ✅ **`/api/turtle` status 字段统一**：sick 龟在详情页也返回 `status="sick"`，与 state 一致
+  - ✅ **sick 龟 income=0**：advance-day income_breakdown 中 `{"coins":0,"reason":"sick","turtle_id":"turtle_2"}`，治疗激励机制已建立
+  - ✅ **SQLite 并发锁稳定**：WAL+busy_timeout 持续有效，并发 advance-day/feed 均 200
+  - ✅ **后端日志落盘**：`/tmp/tk.log` 完整记录 method/path/status/time
+  - ✅ **外网连通性**：`43.134.81.228:1517` 正常
+  - ✅ **clean 水质良好时免扣费**：clarity=100 时 cost=0
+- **手感问题**（不是 bug，但影响体验）：
+  - 小麝香 intimacy=100 已达上限，但其他龟 intimacy 仅 19~26，玩家仍缺乏"雨露均沾"的激励。
+  - 小草 vitality=33 持续 sick 多日，但 skin/shell=78 未衰减，"饿"的后果仍只集中在 vitality/appetite，与真实养龟逻辑有差距。
+  - 2.5 天离线期间，如果玩家在此期间尝试访问，会完全失联，且无数据推进/无离线保护机制。
+- **改进建议**（按性价比排序）：
+  - 🔥 高性价比：**加服务守护进程**。`systemd` 或 `nohup+while true` 循环，确保进程崩溃/终止后自动重启（5 行脚本）。
+  - 🔥 高性价比：**interact 每日亲密上限**。`handleInteract` 中判断 `last_interact_day == today && interact_count_today >= 3` 则 intimacy_delta=0（3 行代码）。
+  - 一般：advance-day 加同 player 5 秒防抖，避免误触双击推进 2 天。
+  - 一般：季节事件增加保底触发（如每 7 天至少 1 次），或 autumn 持续期间随机触发囤膘提示。
+  - 一般：长期 hunger=0 时，每 3 天 skin/shell -1，让"饿"的后果更立体。
+  - 一般：考虑离线保护机制——离线 >24h 后首次登录，龟状态衰减暂停或减缓，降低断签挫败感。
+- **下轮重点关注**：
+  - 服务稳定性：守护进程是否落地，能否持续 10h+ 不崩溃
+  - interact 上限：单日 interact ≥3 次后是否被限制
+  - advance-day 防抖：5 秒内重复调用是否被拦截
+  - 小草 sick 状态：vitality<40 后是否会被动恢复（治疗机制是否存在）
+
+---
+
+### 🐢 测试轮次 2026-05-29 03:50
+- **环境快照**：day=66, season=autumn, coins=464, 龟数=4（小麝香♀、小草♂、新朋友♂、小巴西♀）
+- **与上轮对比**：上轮 day=56/coins=286/龟数=4/season=summer；本轮 day+10, coins+178, season 从 summer→autumn，季节系统终于活了
+- **游玩动作**（10+ 步真实接口）：
+  1. `POST /api/feed`（turtle_1, food_1, hunger=0）→ ✅ hunger+30, intimacy+2, mood+1
+  2. `POST /api/feed`（turtle_2, food_1, sick 状态）→ ✅ hunger+30, intimacy+2, mood+1（sick 龟可正常喂食）
+  3. `POST /api/interact`（turtle_1, pet, intimacy=92）→ ✅ status=ok
+  4. `POST /api/interact`（turtle_1, pet, 同日内第2次）→ ✅ status=ok（intimacy 继续+2）
+  5. `POST /api/clean`（tank_2, ammonia=0.77/clarity=65）→ ✅ cost=60, deep_clean, clarity=100
+  6. `POST /api/advance-day` → ✅ day=64→65, income=33, season_event=`{"type":"fatten","text":"秋季囤膘期,多喂红虫/小鱼储备脂肪"}` 🍂
+  7. `GET /api/breeding-hints` → ✅ 新朋友♂(亲密24) + 小巴西♀(亲密17)，提示"繁殖需双方亲密度≥40"
+  8. `POST /api/feed`（turtle_ubauh3uh, food_1）→ ✅ hunger+30, intimacy+2, mood+1
+  9. `GET /api/turtle?id=turtle_2` → ✅ 返回完整档案+suggestions（含 🩺 sick 预警），但 `status=""` 空字符串
+  10. `GET /api/shop-catalog` → ✅ species 数组完整（8 种龟，含 habitat/unlock_cost/trivia）
+  11. **并发 advance-day ×2**（SQLite 锁极端测试）→ ✅ 两个均返回 200！day=65→66，无 SQLITE_BUSY（上轮 P1 已修复）
+  12. **并发 feed ×4** → ✅ 4 个全部 200，无锁错误
+  13. `curl 43.134.81.228:1517/` → ✅ HTTP 200, t=2.1ms
+- **发现的 Bug**（按严重度 P0/P1/P2）：
+  - [P2] **`/api/turtle` 返回的 sick 龟 `status=""` 空字符串，与 `/api/state` 不一致**。复现：`GET /api/turtle?id=turtle_2` 返回 `status: ""`，但同轮 `GET /api/state` 中小草 `status: "sick"`。两个 API 的数据源不一致，前端若走详情页展示会丢失 sick 状态。期望：统一用同一套状态计算逻辑，sick 龟在两处均返回 `status="sick"`。
+  - [P2] **`interact` 每日亲密上限仍未实现**。小麝香当日 interact 2 次 + feed 2 次，intimacy 从 92→99（+7），远超其他龟的 17~24。长期单龟垄断趋势加剧。期望：`handleInteract` 中加判断，若当日已 interact≥3 次则 intimacy_delta=0。
+  - [P2] **sick 龟仍产收入**。小草 vitality=33/status=sick，但 income_breakdown 仍贡献 5 币/天。上轮建议"sick 时 income=0"未落地，玩家缺乏治疗紧迫感。期望：status="sick" 时该龟 income 贡献=0，suggestions 增加"治疗后可恢复收入"。
+  - [P3] **advance-day 并发时两个请求都成功，day 推进了 2 天**。虽然不再是错误，但玩家快速双击可能导致意外推进 2 天。期望：同 player 5 秒内 advance-day 防抖，或返回 `"操作太频繁"`。
+  - [P3] **`pokedex` 未解锁物种仍有空字符串字段**。`scientific_name=""`、`trivia=""` 等虽已比 "???" 好，但前端展示时可能呈现空白。期望：未解锁项这些字段也填充占位文案或直接从返回中省略。
+- **已修复确认（上轮建议落地）**：
+  - ✅ SQLite 并发锁：`PRAGMA journal_mode=WAL` / `busy_timeout` 已启用，并发 advance-day/feed 不再报错
+  - ✅ 后端日志落盘：`/tmp/tk.log` 完整记录 method/path/status/time
+  - ✅ 外网连通性：`43.134.81.228:1517` 正常
+  - ✅ `shop-catalog` 追加 `species` 数组
+  - ✅ 图鉴未解锁描述改为占位文案，不再出现 `"???"`
+  - ✅ **income 与 health 四维均值挂钩**：小麝香 health_avg=84→13 币，小草 health_avg=55→5 币，反馈链已建立
+  - ✅ **sick 状态部分落地**：`/api/state` 中 vitality<40 触发 `status="sick"`，suggestions 增加 🩺 预警
+  - ✅ **季节切换**：summer→autumn，且触发秋季囤膘事件
+- **手感问题**（不是 bug，但影响体验）：
+  - 秋季 season_event `fatten` 只在 day=65 触发一次，day=66 为 null，事件存在感短暂。
+  - 小草 vitality=33  sick 但 skin/shell=78，长期饥饿只损 vitality/appetite，不影响皮肤/壳况，与真实养龟逻辑仍有差距。
+  - 小麝香 intimacy=99 一骑绝尘，其他龟几乎没有互动价值，玩家缺少"雨露均沾"的激励。
+  - 4 只龟 hunger 再次全部归零（ feed 后又被 advance-day 吃掉了），cleanliness 也偏低，断签惩罚仍然尖锐。
+- **改进建议**（按性价比排序）：
+  - 🔥 高性价比：**统一 `/api/turtle` 的 `status` 字段**。复用 `/api/state` 中计算 sick 状态的同一函数，确保 sick 龟在详情页也显示 `status="sick"`（估计 3 行代码）。
+  - 🔥 高性价比：**interact 每日亲密上限**。`handleInteract` 中判断 `last_interact_day == today && interact_count_today >= 3`，则 intimacy_delta=0（3 行代码）。
+  - 🔥 高性价比：**sick 龟 income=0**。`advancePlayerTurtles` 中若 `status="sick"`，则该龟当日 income 贡献=0，suggestions 追加"治疗后可恢复收入"（5 行代码）。
+  - 一般：advance-day 加同 player 5 秒防抖，避免误触双击推进 2 天。
+  - 一般：`pokedex` 未解锁项省略空字符串字段，或统一填充 `"？"` 占位符。
+  - 一般：长期 hunger=0 时，每 3 天 skin/shell -1，让"饿"的后果更立体。
+- **下轮重点关注**：
+  - `/api/turtle` status 字段是否修复一致
+  - interact 上限是否落地
+  - sick 龟 income 是否降至 0
+  - 小草 vitality<40 后是否会被动恢复（治疗机制是否存在）
+
+---
+
 ### 🐢 测试轮次 2026-05-28 17:50
 - **环境快照**：day=56, season=summer, coins≈286, 龟数=4（小麝香♀、小草♂、新朋友♂、小巴西♀）
 - **与上轮对比**：上轮 day=51/coins=286/龟数=4；本轮因测试消耗清洁60 + advance-day收入26×2，净变化微降；无新增龟/蛋

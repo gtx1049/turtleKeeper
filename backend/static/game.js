@@ -293,6 +293,18 @@ function getTurtleVisual(species) {
             slug: 'margin', label: '黄缘', shell: '#5b3420', shellHi: '#8a4d28', skin: '#715033', stripe: '#ffbf4b', rim: '#f0a531', belly: '#e5b65e',
             scale: 1.04, shape: 'box', pattern: 'margin', rows: [2, 6, 10, 12, 12, 10, 6, 2], keel: true, spots: false, tail: 'short'
         },
+        loggerheadMuskTurtle: {
+            slug: 'loggerhead', label: '果核', shell: '#5a4a2a', shellHi: '#8a7a4a', skin: '#6b5a3a', stripe: '#f0c040', rim: '#3a2a15', belly: '#d4b86a',
+            scale: 0.90, shape: 'flat', pattern: 'musk', rows: [4, 8, 10, 12, 12, 10, 8, 4], keel: false, spots: true, tail: 'short'
+        },
+        chineseStripeTurtle: {
+            slug: 'stripe', label: '花龟', shell: '#3a5a2a', shellHi: '#5a7a3a', skin: '#4a6a3a', stripe: '#a8d060', rim: '#2a3a1a', belly: '#c8d86a',
+            scale: 1.0, shape: 'oval', pattern: 'scutes', rows: [4, 8, 12, 12, 12, 10, 6], keel: false, spots: true, tail: 'long'
+        },
+        redEaredSlider: {
+            slug: 'slider', label: '巴西', shell: '#2a4a2a', shellHi: '#3a6a3a', skin: '#3a6a3a', stripe: '#e04040', rim: '#1a2a15', belly: '#a8c060',
+            scale: 1.05, shape: 'oval', pattern: 'scutes', rows: [4, 8, 12, 12, 12, 10, 6], keel: false, spots: false, tail: 'long'
+        },
     };
     return visuals[species] || visuals.chinesePondTurtle;
 }
@@ -1454,8 +1466,11 @@ function speciesMeta(speciesId) {
     const meta = {
         muskTurtle: { name: '麝香龟', habitat_type: 'deep' },
         razorbackTurtle: { name: '剃刀龟', habitat_type: 'deep' },
+        loggerheadMuskTurtle: { name: '果核泥龟', habitat_type: 'deep' },
         chinesePondTurtle: { name: '中华草龟', habitat_type: 'middle' },
         yellowPondTurtle: { name: '黄喉拟水龟', habitat_type: 'middle' },
+        chineseStripeTurtle: { name: '中华花龟', habitat_type: 'middle' },
+        redEaredSlider: { name: '巴西龟', habitat_type: 'middle' },
         yellowMarginTurtle: { name: '黄缘闭壳龟', habitat_type: 'land' },
     };
     return meta[speciesId] || { name: '未知龟种', habitat_type: 'middle' };
@@ -1640,6 +1655,9 @@ async function buySpecies(species) {
 function defaultNameForSpecies(speciesId) {
     const names = {
         razorbackTurtle: '小剃刀',
+        loggerheadMuskTurtle: '小果核',
+        chineseStripeTurtle: '小花花',
+        redEaredSlider: '小巴西',
         yellowPondTurtle: '小黄喉',
         yellowMarginTurtle: '小黄缘',
     };
