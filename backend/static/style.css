@@ -1126,3 +1126,83 @@ body {
 .egg-progress { font-size: 12px; color: #ffd166; margin-top: 4px; }
 .egg-progress b { font-size: 14px; color: #ffe28a; }
 .empty-state { text-align: center; padding: 24px; color: #8a8870; font-size: 13px; line-height: 1.6; }
+
+/* ============ 成就系统（M4 收集） ============ */
+#achievements-stat { cursor: pointer; transition: transform .15s; }
+#achievements-stat:hover { transform: scale(1.05); }
+#achievements-stat .icon { filter: drop-shadow(0 0 4px rgba(255,215,0,0.35)); }
+
+.achievements-header {
+    text-align: center;
+    margin: 4px 0 14px;
+}
+.achievements-progress-bar {
+    height: 8px;
+    background: #1e293b;
+    border-radius: 4px;
+    overflow: hidden;
+    margin: 6px 0;
+}
+.achievements-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, #fbbf24, #f59e0b);
+    border-radius: 4px;
+    transition: width .4s ease;
+}
+.achievements-progress-text {
+    font-size: 12px;
+    color: #94a3b8;
+}
+
+.achievement-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border-radius: 12px;
+    margin-bottom: 10px;
+    border: 1px solid rgba(255,255,255,0.08);
+    transition: all .2s;
+}
+.achievement-card.unlocked {
+    background: rgba(251, 191, 36, 0.08);
+    border-color: rgba(251, 191, 36, 0.25);
+}
+.achievement-card.locked {
+    background: rgba(255,255,255,0.04);
+    opacity: 0.65;
+}
+
+.achievement-icon {
+    font-size: 32px;
+    min-width: 44px;
+    text-align: center;
+    filter: drop-shadow(0 2px 4px rgba(0,0,0,0.3));
+}
+.achievement-card.locked .achievement-icon {
+    filter: grayscale(0.6) drop-shadow(0 2px 4px rgba(0,0,0,0.2));
+}
+
+.achievement-info { flex: 1; }
+.achievement-name {
+    font-size: 14px;
+    font-weight: 700;
+    color: #f0e6c8;
+}
+.achievement-card.locked .achievement-name {
+    color: #9ca3af;
+}
+.achievement-desc {
+    font-size: 12px;
+    color: #a1a1aa;
+    margin-top: 3px;
+}
+.achievement-unlock-day {
+    font-size: 11px;
+    color: #fbbf24;
+    margin-top: 4px;
+    font-weight: 600;
+}
+.achievement-card.locked .achievement-unlock-day {
+    color: #6b7280;
+}

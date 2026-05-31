@@ -86,11 +86,17 @@ function getBreedingHintForTurtle(turtleId) {
 
 function updateUI() {
     if (!gameState) return;
-    
+
     // 更新顶部状态
     document.getElementById('coins').textContent = gameState.coins;
     const seasonNames = {spring: '春季', summer: '夏季', autumn: '秋季', winter: '冬季'};
     document.getElementById('day-info').textContent = `第 ${gameState.day} 天 · ${seasonNames[gameState.season] || gameState.season}`;
+
+    // 成就计数
+    const achievements = gameState.achievements || [];
+    const unlockedCount = achievements.filter(a => a.unlocked).length;
+    const achCountEl = document.getElementById('achievements-count');
+    if (achCountEl) achCountEl.textContent = `${unlockedCount}/${achievements.length || 5}`;
 
     // M5 孵化中蛋计数徽章
     const eggs = gameState.eggs || [];
@@ -993,6 +999,10 @@ function bindEvents() {
     // 龟蛋 HUD 点击
     const eggsStat = document.getElementById('eggs-stat');
     if (eggsStat) eggsStat.addEventListener('click', showEggsModal);
+
+    // 成就入口
+    const achStat = document.getElementById('achievements-stat');
+    if (achStat) achStat.addEventListener('click', showAchievements);
     
     // 关闭弹窗
     document.querySelectorAll('.close-btn').forEach(btn => {
@@ -1662,6 +1672,46 @@ function defaultNameForSpecies(speciesId) {
         yellowMarginTurtle: '小黄缘',
     };
     return names[speciesId] || '新朋友';
+}
+
+function showAchievements() {
+    const modal = document.getElementById('achievements-modal');
+    const list = document.getElementById('achievements-list');
+    const header = document.getElementById('achievements-header');
+    if (!modal || !list) return;
+
+    const achievements = gameState.achievements || [];
+    const total = achievements.length || 0;
+    const unlocked = achievements.filter(a => a.unlocked).length;
+    const pct = total > 0 ? Math.round((unlocked / total) * 100) : 0;
+
+    header.innerHTML = `
+        <div class="achievements-progress-text">已解锁 ${unlocked} / ${total} 项成就 · ${pct}%</div>
+        <div class="achievements-progress-bar"><div class="achievements-progress-fill" style="width:${pct}%"></div></div>
+    `;
+
+    list.innerHTML = '';
+    if (total === 0) {
+        list.innerHTML = '<div class="empty-state">暂无成就数据，推进几天后再来看看吧</div>';
+    } else {
+        achievements.forEach(a => {
+            const card = document.createElement('div');
+            card.className = 'achievement-card' + (a.unlocked ? ' unlocked' : ' locked');
+            const icon = a.unlocked ? '🏆' : '🔒';
+            const unlockTag = a.unlocked && a.unlock_day > 0 ? `<div class="achievement-unlock-day">📅 第 ${a.unlock_day} 天解锁</div>` : '';
+            card.innerHTML = `
+                <div class="achievement-icon">${icon}</div>
+                <div class="achievement-info">
+                    <div class="achievement-name">${a.name}</div>
+                    <div class="achievement-desc">${a.description}</div>
+                    ${unlockTag}
+                </div>
+            `;
+            list.appendChild(card);
+        });
+    }
+
+    modal.classList.remove('hidden');
 }
 
 function closeAllModals() {

@@ -14,6 +14,10 @@
                 <span class="icon">🪙</span>
                 <span id="coins">500</span>
             </div>
+            <div class="stat-item" id="achievements-stat" title="成就" style="cursor:pointer">
+                <span class="icon">🏆</span>
+                <span id="achievements-count">0/5</span>
+            </div>
             <div class="stat-item">
                 <span class="icon">📅</span>
                 <span id="day-info">第 1 天 · 春季</span>
@@ -170,6 +174,16 @@
                 <h3>🪵 布置龟缸</h3>
                 <p class="modal-tip">选择一个造景，会放到当前龟缸；放好后可直接在缸里拖动调整位置。</p>
                 <div id="decor-list"></div>
+                <button class="close-btn">关闭</button>
+            </div>
+        </div>
+
+        <!-- 成就弹窗 -->
+        <div id="achievements-modal" class="modal hidden">
+            <div class="modal-content wide">
+                <h3>🏆 成就</h3>
+                <div id="achievements-header"></div>
+                <div id="achievements-list"></div>
                 <button class="close-btn">关闭</button>
             </div>
         </div>
