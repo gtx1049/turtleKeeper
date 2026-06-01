@@ -1,0 +1,19 @@
+[Unit]
+Description=TurtleKeeper - 龟乐园养龟模拟器
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/.openclaw/workspace/turtleKeeper/backend
+ExecStart=/root/.openclaw/workspace/turtleKeeper/backend/turtlekeeper
+Environment=DATA_DIR=/root/.openclaw/workspace/turtleKeeper/backend/data
+Environment=STATIC_DIR=/root/.openclaw/workspace/turtleKeeper/backend/static
+Environment=PORT=1517
+Restart=on-failure
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

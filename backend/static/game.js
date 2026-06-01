@@ -56,8 +56,19 @@ function resizeCanvas() {
 async function loadGameState() {
     try {
         const res = await fetch(`${API_BASE}/api/state?player_id=default`);
+        const prevAchievements = (gameState && gameState.achievements) ? gameState.achievements.slice() : null;
         gameState = await res.json();
-        
+
+        // 检测新解锁的成就,弹出 toast
+        if (prevAchievements && gameState.achievements) {
+            const prevMap = {};
+            prevAchievements.forEach(a => { prevMap[a.id] = a.unlocked; });
+            const newlyUnlocked = gameState.achievements.filter(a => a.unlocked && !prevMap[a.id]);
+            newlyUnlocked.forEach((a, i) => {
+                setTimeout(() => showToast(`🏆 成就解锁：${a.name}`), 600 + i * 1800);
+            });
+        }
+
         updateUI();
         initTurtleRenderers();
         await loadBreedingHints();

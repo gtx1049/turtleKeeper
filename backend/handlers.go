@@ -462,6 +462,8 @@ func getOrCreatePlayer(playerID string) (*GameState, error) {
 }
 
 // ensureAchievementsExist 在老存档里补上后加的成就记录,以免玩家看不到。
+// 同时对「状态型」成就进行回扫(看玩家当前状态是否已经达成),修复了
+// ach_1 之类需要存档已有龟就直接亮起的成就。
 func ensureAchievementsExist(playerID string, player *GameState) {
 	defaults := []Achievement{
 		{ID: "ach_1", Name: "初来乍到", Description: "获得第一只乌龟"},
@@ -469,6 +471,13 @@ func ensureAchievementsExist(playerID string, player *GameState) {
 		{ID: "ach_3", Name: "换水达人", Description: "第一次换水"},
 		{ID: "ach_4", Name: "布景师", Description: "第一次布置造景"},
 		{ID: "ach_5", Name: "破产边缘", Description: "第一次在商店购物"},
+		{ID: "ach_6", Name: "龟丁兴旺", Description: "同时拥有 3 只乌龟"},
+		{ID: "ach_7", Name: "五龟临门", Description: "同时拥有 5 只乌龟"},
+		{ID: "ach_8", Name: "繁殖达人", Description: "成功孵化第一只龟蛋"},
+		{ID: "ach_9", Name: "生态布景师", Description: "某缸生态评分达到 80+"},
+		{ID: "ach_10", Name: "百日龟友", Description: "坚持养龟 100 天"},
+		{ID: "ach_11", Name: "图鉴猎人", Description: "解锁 5 种龟"},
+		{ID: "ach_12", Name: "全品种制霸", Description: "解锁所有 8 种龟"},
 	}
 	existing := map[string]bool{}
 	for _, a := range player.Achievements {
@@ -485,6 +494,63 @@ func ensureAchievementsExist(playerID string, player *GameState) {
 	if changed {
 		player.Achievements, _ = loadAchievements(playerID)
 	}
+
+	// 状态型成就回扫:不依赖某次具体动作,只要当前状态符合就解锁。
+	// 这样老存档/导入存档也能正确点亮。
+	checkStatefulAchievements(playerID, player)
+}
+
+// checkStatefulAchievements 根据当前玩家状态扫描并解锁所有「状态型」成就。
+// 设计原则:幂等,只把未解锁的解锁(unlocked=0 → 1),已解锁的保持原 unlock_day。
+func checkStatefulAchievements(playerID string, player *GameState) {
+	unlock := func(id string) {
+		db.Exec(`UPDATE achievements SET unlocked = 1, unlock_day = (SELECT day FROM players WHERE id = ?)
+			WHERE player_id = ? AND id = ? AND unlocked = 0`, playerID, playerID, id)
+	}
+
+	turtleCount := len(player.Turtles)
+	if turtleCount >= 1 {
+		unlock("ach_1") // 修复 ach_1:有龟就亮
+	}
+	if turtleCount >= 3 {
+		unlock("ach_6")
+	}
+	if turtleCount >= 5 {
+		unlock("ach_7")
+	}
+
+	// 繁殖达人:有任何 birth_day > 1 的龟即孵化过
+	for _, t := range player.Turtles {
+		if t.BirthDay > 1 {
+			unlock("ach_8")
+			break
+		}
+	}
+
+	// 生态布景师:任意缸 EcoScore >= 80
+	for _, tk := range player.Tanks {
+		if calculateTankDecorScore(tk.ID).Score >= 80 {
+			unlock("ach_9")
+			break
+		}
+	}
+
+	// 百日龟友
+	if player.Day >= 100 {
+		unlock("ach_10")
+	}
+
+	// 图鉴解锁数
+	unlockedCount := len(player.UnlockedSpecies)
+	if unlockedCount >= 5 {
+		unlock("ach_11")
+	}
+	if unlockedCount >= 8 {
+		unlock("ach_12")
+	}
+
+	// 把可能更新的成就重新加载回 player.Achievements,供前端展示
+	player.Achievements, _ = loadAchievements(playerID)
 }
 
 // 初始化默认乌龟
@@ -566,6 +632,13 @@ func initAchievements(playerID string) {
 		{ID: "ach_3", Name: "换水达人", Description: "第一次换水"},
 		{ID: "ach_4", Name: "布景师", Description: "第一次布置造景"},
 		{ID: "ach_5", Name: "破产边缘", Description: "第一次在商店购物"},
+		{ID: "ach_6", Name: "龟丁兴旺", Description: "同时拥有 3 只乌龟"},
+		{ID: "ach_7", Name: "五龟临门", Description: "同时拥有 5 只乌龟"},
+		{ID: "ach_8", Name: "繁殖达人", Description: "成功孵化第一只龟蛋"},
+		{ID: "ach_9", Name: "生态布景师", Description: "某缸生态评分达到 80+"},
+		{ID: "ach_10", Name: "百日龟友", Description: "坚持养龟 100 天"},
+		{ID: "ach_11", Name: "图鉴猎人", Description: "解锁 5 种龟"},
+		{ID: "ach_12", Name: "全品种制霸", Description: "解锁所有 8 种龟"},
 	}
 
 	for _, a := range achievements {
@@ -783,6 +856,9 @@ func handleGetState(w http.ResponseWriter, r *http.Request) {
 	for i := range state.Tanks {
 		state.Tanks[i].WaterHistory = loadWaterHistory(state.Tanks[i].ID, 14)
 	}
+
+	// 在所有状态计算之后,补一轮状态型成就扫描(老存档进游戏即可看到应得成就亮起)
+	checkStatefulAchievements(playerID, state)
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(state)

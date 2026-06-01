@@ -223,6 +223,63 @@ type Tank struct {
 
 <!-- AI_TESTER_LOG_START -->
 
+### 🐢 测试轮次 2026-06-01 06:50
+- **环境快照**：day=72, season=autumn, coins=578, 龟数=4（小麝香♀intimacy=100、小草♂sick、新朋友♂intimacy=31、小巴西♀intimacy=19）
+- **与上轮对比**：上轮 day=69/coins=551/season=autumn；本轮 day+3, coins+27（advance-day income 29×3，clean cost=60）。服务自 01:50 重启后已**稳定运行 5h+**，数据完全连贯，无崩溃无漂移。
+- **游玩动作**（15 步真实接口）：
+  1. `GET /api/state` → ✅ day=69, coins=551（与上轮完全一致，5h 内无自动推进）
+  2. `POST /api/feed`（turtle_1, hunger=0 极端喂食）→ ✅ hunger+30, intimacy+2, mood+1
+  3. `POST /api/feed`（turtle_2, food_1, sick 状态）→ ✅ hunger+30, intimacy+2, mood+1（sick 龟可正常喂食）
+  4. `POST /api/interact`（turtle_1, pet, intimacy=100）→ ✅ status=ok（总上限已封顶）
+  5. `POST /api/interact`（turtle_1779853832205144140, pet）→ ✅ status=ok
+  6. `POST /api/clean`（tank_2, ammonia=0.59/clarity=85）→ ✅ cost=60, deep_clean, clarity=100
+  7. `POST /api/advance-day` → ✅ day=70, income=29, 小草 income=0 reason="sick"
+  8. `POST /api/advance-day`（并发 #1）→ ✅ day=71, income=29
+  9. `POST /api/advance-day`（并发 #2）→ ✅ day=72, income=29（**两个均 200，day 推进 2 天**）
+  10. `GET /api/breeding-hints` → ✅ 新朋友♂(亲密31) + 小巴西♀(亲密19)，提示"繁殖需双方亲密度≥40"
+  11. `POST /api/interact`（turtle_1, pet, 当日第1次）→ ✅ status=ok
+  12. `POST /api/interact`（turtle_1, pet, 当日第2次）→ ✅ status=ok
+  13. `POST /api/interact`（turtle_1, pet, 当日第3次）→ ✅ status=ok
+  14. `POST /api/interact`（turtle_1, pet, 当日第4次）→ ✅ status=ok（**单日 interact 4 次无上限**）
+  15. `GET /api/shop-catalog` → ✅ species 数组完整（8 种龟）
+  16. `GET /api/pokedex` → ✅ 未解锁 description 占位文案，但 trivia/scientific_name 仍为空字符串
+  17. `GET /api/turtle?id=turtle_2` → ✅ status="sick" 与 state 一致
+  18. `POST /api/feed`（turtle_2, hunger=60 满值喂食）→ ✅ hunger_delta=30，接口不溢出不报错
+  19. `GET /api/state` (final) → ✅ day=72, coins=578, 小巴西 health.vitality=70（-4，正常衰减）
+- **发现的 Bug**（按严重度 P0/P1/P2）：
+  - **[P1] `interact` 每日亲密上限仍未实现**。本轮小麝香当日 interact 4 次（last_interact_day=66, today=72，计数重置后），4 次全部 status=ok。虽然 intimacy 已达总上限 100 未继续增长，但若非满值龟仍可在单日内无限刷亲密。期望：`handleInteract` 中加判断，若 `last_interact_day == today && interact_count_today >= 3` 则 intimacy_delta=0。
+  - [P2] **并发 advance-day 时两个请求都成功，day 推进了 2 天**。虽然无 SQLITE_BUSY，但玩家快速双击/并发调用会导致意外推进 2 天（70→72）。期望：同 player 5 秒内 advance-day 防抖，或返回 `"操作太频繁"`。
+  - [P2] **秋季 season_event 持续 null**。day=70~72 连续无事件，autumn 自 day=65 后未再触发 `fatten`，季节存在感极弱。期望：每季节至少保底触发 1 次事件，或增加倒计时提示。
+  - [P2] **`pokedex` 未解锁物种仍有空字符串字段**。`trivia=""`、`scientific_name=""`、`native_region=""`、`adult_size=""`，前端展示时可能呈现空白。期望：未解锁项省略空字符串字段，或统一填充 `"？"` 占位符。
+  - [P3] **hunger 满值喂食不溢出也不报错**。turtle_2 hunger=60 时再 feed，返回 hunger_delta=30，实际 hunger 可能到 90（超过 100？），接口无"过饱"提示。期望：hunger≥70 时返回提示或 hunger_delta 递减。
+- **已修复确认（上轮建议落地）**：
+  - ✅ **服务稳定**：自 01:50 重启后已运行 5h+，无崩溃、无 OOM、无端口漂移
+  - ✅ **`/api/turtle` status 字段统一**：sick 龟在详情页也返回 `status="sick"`，与 state 一致
+  - ✅ **sick 龟 income=0**：advance-day 中 turtle_2 `{"coins":0,"reason":"sick"}`，治疗激励机制已建立
+  - ✅ **SQLite 并发锁稳定**：WAL+busy_timeout 持续有效，并发 advance-day/feed/interact 均 200
+  - ✅ **后端日志落盘**：`/tmp/tk.log` 完整记录 method/path/status/time
+  - ✅ **外网连通性**：`localhost:1517` 正常，上轮外网已确认通
+  - ✅ **shop-catalog species 数组完整**：8 种龟信息齐全
+- **手感问题**（不是 bug，但影响体验）：
+  - 小麝香 intimacy=100 一骑绝尘，其他龟 19~31，玩家仍缺乏"雨露均沾"的激励。
+  - 小草 vitality=33 持续 sick 多日（自 day=51 起已约 20 天），无被动恢复机制，玩家只能持续看着 sick 状态，缺乏"治疗成功"的正反馈。
+  - 新朋友/小巴西 hunger 再次归零，每日喂食压力对"佛系养龟"定位仍偏严苛。尤其 combined with 无离线保护，断签玩家会面临全龟濒死。
+  - 秋季 season_event 自 day=65 一次 `fatten` 后持续 null，季节系统像静态标签。
+- **改进建议**（按性价比排序）：
+  - 🔥 高性价比：**interact 每日亲密上限**。`handleInteract` 中判断 `last_interact_day == today && interact_count_today >= 3` 则 intimacy_delta=0（3 行代码）。
+  - 🔥 高性价比：**advance-day 5 秒防抖**。同 player 5 秒内重复调用返回 `"操作太频繁"`（5 行代码）。
+  - 一般：季节事件增加保底触发（如每 7 天至少 1 次），或 autumn 持续期间随机触发囤膘提示。
+  - 一般：`pokedex` 未解锁项省略空字符串字段，或统一填充 `"？"` 占位符。
+  - 一般：hunger≥70 时 feed 返回 `"已经很饱了"` 或递减 hunger_delta。
+  - 一般：sick 龟在长期水质良好 + 喂食充足时，vitality 每天 +1 缓慢恢复，给玩家"治疗见效"的正反馈。
+- **下轮重点关注**：
+  - 服务稳定性：能否持续 10h+ 不崩溃（当前 5h 稳定）
+  - interact 上限：单日 interact ≥3 次后是否被限制
+  - advance-day 防抖：5 秒内重复调用是否被拦截
+  - 小草 sick 状态：vitality<40 后是否存在被动恢复机制
+
+---
+
 ### 🐢 测试轮次 2026-06-01 01:50
 - **环境快照**：day=69, season=autumn, coins=551, 龟数=4（小麝香♀intimacy=100、小草♂sick、新朋友♂、小巴西♀）
 - **与上轮对比**：上轮 day=66/coins=464/龟数=4/season=autumn；本轮服务此前**已离线约 2.5 天**（5/29 03:50 → 6/1 01:50），数据完全停滞，手动重启后才恢复。day 仅因本轮测试推进 +3（66→69），coins +87（测试 income 29×3）。
