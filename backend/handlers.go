@@ -238,6 +238,10 @@ var db *sql.DB
 // advance-day 串行化锁：缓解并发写冲突（AI_TESTER P1）
 var advanceDayMutex sync.Mutex
 
+// advance-day 玩家级防抖：5 秒内同 player 重复请求直接拒绝（AI_TESTER P1）
+var advanceDayLastTime = map[string]time.Time{}
+var advanceDayLastTimeMu sync.Mutex
+
 // 初始化数据库
 func initDB(dataDir string) error {
 	var err error
@@ -886,8 +890,23 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// AI_TESTER P2: 过饱保护 — 真实养龟里过饱比饥饿更危险
+	var currentHunger int
+	db.QueryRow("SELECT hunger FROM turtles WHERE id = ? AND player_id = ?", req.TurtleID, req.PlayerID).Scan(&currentHunger)
+	if currentHunger >= 90 {
+		http.Error(w, "这只龟已经很饱了，再喂会伤肠胃", http.StatusBadRequest)
+		return
+	}
+	overfeedPenalty := 0
+	if currentHunger >= 70 {
+		overfeedPenalty = 1 // hunger_delta 减半标记
+	}
+
 	// 不同食物效果不同,记住买什么不仅仅是堆数量。
 	hungerDelta, intimacyDelta, vitalityDelta, moodDelta := foodEffect(req.FoodID)
+	if overfeedPenalty > 0 {
+		hungerDelta = hungerDelta / 2
+	}
 	db.Exec(`UPDATE turtles SET
 		hunger     = MIN(100, hunger + ?),
 		intimacy   = MIN(100, intimacy + ?),
@@ -901,14 +920,18 @@ func handleFeed(w http.ResponseWriter, r *http.Request) {
 	// 喂食成就
 	db.Exec("UPDATE achievements SET unlocked = 1, unlock_day = (SELECT day FROM players WHERE id = ?) WHERE player_id = ? AND id = 'ach_2' AND unlocked = 0", req.PlayerID, req.PlayerID)
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]interface{}{
+	resp := map[string]interface{}{
 		"status":         "ok",
 		"hunger_delta":   hungerDelta,
 		"intimacy_delta": intimacyDelta,
 		"vitality_delta": vitalityDelta,
 		"mood_delta":     moodDelta,
-	})
+	}
+	if overfeedPenalty > 0 {
+		resp["message"] = "龟龟已经很饱了，这次只吃了平时的一半"
+	}
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(resp)
 }
 
 // foodEffect 返回指定食物 id 的四项加成 (hunger, intimacy, vitality, mood)
@@ -1397,6 +1420,16 @@ func handleAdvanceDay(w http.ResponseWriter, r *http.Request) {
 		json.NewEncoder(w).Encode(map[string]string{"status": "error", "message": msg})
 	}
 
+	// 5 秒防抖：同 player 短时间内重复 advance-day 直接拒绝
+	advanceDayLastTimeMu.Lock()
+	if last, ok := advanceDayLastTime[req.PlayerID]; ok && time.Since(last) < 5*time.Second {
+		advanceDayLastTimeMu.Unlock()
+		writeErr(http.StatusTooManyRequests, "操作太快了，请稍后再试")
+		return
+	}
+	advanceDayLastTime[req.PlayerID] = time.Now()
+	advanceDayLastTimeMu.Unlock()
+
 	// 懒初始化:所有写 API 都走这一步,避免冷启动 + 直接调用就 player not found。
 	if _, err := getOrCreatePlayer(req.PlayerID); err != nil {
 		writeErr(http.StatusInternalServerError, err.Error())
@@ -1526,30 +1559,59 @@ func computeDailyIncome(playerID string) (int, []map[string]interface{}) {
 
 // seasonalEvent 给前端展示季节小事件,配合 M5 时间系统。
 // 不真改龟属性(避免和水质系统打架),但让玩家感受到节律。
+// AI_TESTER P2: 保底机制 — 每 7 天至少触发 1 次季节事件，避免整季无感。
 func seasonalEvent(season string, day int, playerID string) map[string]interface{} {
 	dayInSeason := day % 30
+
+	// 固定日历事件
 	switch season {
 	case "spring":
-		if dayInSeason == 5 {
+		if dayInSeason == 5 || dayInSeason == 22 {
 			return map[string]interface{}{"type": "breeding_hint", "icon": "💕", "text": "春暖,龟们开始追逐求偶。同缸异性高亲密龟有机会产蛋。"}
 		}
 	case "summer":
 		if dayInSeason == 5 {
 			return map[string]interface{}{"type": "heat_warning", "icon": "🔥", "text": "夏季高温,注意换水频率和遮阴"}
 		}
-		if dayInSeason == 18 {
+		if dayInSeason == 12 || dayInSeason == 18 {
 			return map[string]interface{}{"type": "feast", "icon": "🍤", "text": "伏天龟食欲旺,多投喂可加速成长"}
 		}
 	case "autumn":
-		if dayInSeason == 5 {
+		if dayInSeason == 5 || dayInSeason == 20 {
 			return map[string]interface{}{"type": "fatten", "icon": "🍂", "text": "秋季囤膘期,多喂红虫/小鱼储备脂肪"}
 		}
 	case "winter":
-		if dayInSeason == 2 {
+		if dayInSeason == 2 || dayInSeason == 10 {
 			return map[string]interface{}{"type": "hibernate_hint", "icon": "❄️", "text": "水温下降,龟将进入半冬眠(暂未实装详细系统)"}
 		}
-		if dayInSeason == 15 {
+		if dayInSeason == 15 || dayInSeason == 25 {
 			return map[string]interface{}{"type": "warm_check", "icon": "🛁", "text": "寒潮中,检查加热棒和过滤器是否在线"}
+		}
+	}
+
+	// 保底：每 7 天至少触发 1 次随机季节小事件
+	if dayInSeason%7 == 0 {
+		messages := map[string][]map[string]interface{}{
+			"spring": {
+				{"type": "random", "icon": "🌸", "text": "一阵春风吹过，水面的落花让龟龟心情不错"},
+				{"type": "random", "icon": "🌧️", "text": "春雨绵绵，空气湿度上升，龟壳更有光泽"},
+			},
+			"summer": {
+				{"type": "random", "icon": "☀️", "text": "阳光充足，龟龟晒背时间变长了"},
+				{"type": "random", "icon": "⛈️", "text": "午后雷阵雨，水温略有下降"},
+			},
+			"autumn": {
+				{"type": "random", "icon": "🍁", "text": "落叶飘入龟缸，记得及时清理"},
+				{"type": "random", "icon": "🌫️", "text": "秋雾朦胧，龟龟活动量略有减少"},
+			},
+			"winter": {
+				{"type": "random", "icon": "🧊", "text": "水面结了一层薄冰，注意保温"},
+				{"type": "random", "icon": "🌨️", "text": "初雪落下，龟龟躲进了深水区"},
+			},
+		}
+		msgs := messages[season]
+		if len(msgs) > 0 {
+			return msgs[mrand.Intn(len(msgs))]
 		}
 	}
 	return nil
@@ -1744,6 +1806,36 @@ func advancePlayerTurtles(playerID string) error {
 			return err
 		}
 	}
+	// AI_TESTER P1: sick 龟恢复机制 — 水质良好+喂食充足时缓慢自愈，给玩家正反馈。
+	// 先查出所有 sick 龟及其缸的水质，计算是否满足恢复条件。
+	rowsSick, errSick := db.Query(`SELECT t.id, t.hunger, COALESCE(tk.ammonia,0), COALESCE(tk.nitrite,0), COALESCE(tk.clarity,100)
+		FROM turtles t LEFT JOIN tanks tk ON t.tank_id = tk.id
+		WHERE t.player_id = ? AND t.status = 'sick'`, playerID)
+	if errSick == nil {
+		defer rowsSick.Close()
+		for rowsSick.Next() {
+			var sid string
+			var hunger, clarity int
+			var ammonia, nitrite float64
+			if err := rowsSick.Scan(&sid, &hunger, &ammonia, &nitrite, &clarity); err != nil {
+				continue
+			}
+			// 恢复条件：水质良好（清澈≥80、氨<0.3、亚硝<0.3）且不饿（hunger≥30）
+			if clarity >= 80 && ammonia < 0.3 && nitrite < 0.3 && hunger >= 30 {
+				// 每天 vitality+2，其他三维+1，缓慢但可感知
+				db.Exec(`UPDATE turtles SET
+					vitality = MIN(100, vitality + 2),
+					appetite = MIN(100, appetite + 1),
+					skin = MIN(100, skin + 1),
+					shell = MIN(100, shell + 1)
+					WHERE id = ?`, sid)
+			} else if clarity >= 60 && ammonia < 0.5 && nitrite < 0.5 && hunger >= 15 {
+				// 水质一般时也有微弱恢复：vitality+1
+				db.Exec(`UPDATE turtles SET vitality = MIN(100, vitality + 1) WHERE id = ?`, sid)
+			}
+		}
+	}
+
 	// AI_TESTER P2: vitality<40 触发 sick 状态，否则恢复 healthy
 	_, err2 := db.Exec(`UPDATE turtles SET status = CASE WHEN vitality < 40 THEN 'sick' ELSE 'healthy' END WHERE player_id = ?`, playerID)
 	if err2 != nil {
